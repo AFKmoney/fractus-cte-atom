@@ -24,6 +24,18 @@ ATOM Atomizer source: [`AFKmoney/atom-ai`](https://github.com/AFKmoney/atom-ai) 
 
 No x8 checkpoint is in this repo. Do not load one.
 
+## Philosophy
+
+Three properties, and they are the product, not a slogan.
+
+**It thinks continuously.** Fractus is not a one-shot function from prompt to completion. A tick advances a residual thought `h` through the block stack. Attention carry `(S, z)` and Kuramoto phase stay live across chunks. Output is a next-id distribution on that state, not a separate decode graph. The Atomizer does not change this. It only changes what an id is.
+
+**It trains without a finish line.** The checkpoint is a seed, not a release cut. This fork starts at token 0 because the head is new. After that, training only moves forward: same weights, same Atom id stream, next offset written into the checkpoint. There is no "done" step that freezes the brain and throws away the trainer. Infinite here means unbounded continuation, not a promise that a given run never crashes.
+
+**It opens quickly.** The parent model paid ~128M parameters for a GPT-2 head of 50257 ids before a single block ran. This fork's head is 266 ids (`266 × 1280 ≈ 0.34M` tied embed). Load is the block stack plus a byte-span tokenizer with no merge table and no Hugging Face tokenizer runtime. Startup cost is the CTE weights, not a 50k vocab.
+
+What was accepted for this fork: Atomizer spans adapted to Fractus integer ticks, vocab 266, train from scratch, x8 left untouched. Packet features (320-d) stay off the id stream. The boundary marker is the Atomizer decision the head can see.
+
 ## What this fork is
 
 Fractus CTE is not a transformer. It keeps a residual thought state `h`, advances it tick by tick through a stack of blocks (linear attention carry `(S, z)`, Kuramoto phase clock, phase-routed MoE), and emits a next-id distribution from a head tied to the input embedding.
