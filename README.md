@@ -36,6 +36,8 @@ Three properties, and they are the product, not a slogan.
 
 What was accepted for this fork: Atomizer spans adapted to Fractus integer ticks, vocab 266, train from scratch, x8 left untouched. Packet features (320-d) stay off the id stream. The boundary marker is the Atomizer decision the head can see.
 
+**It grows without bound, in the body only.** `grow_atom` zero-pads a trained engine into a larger one: `d_model`, depth, experts, oscillator count, coupling rank. Old rows are copied, new rows start neutral, expert phases of the copied experts are kept so the router does not forget who was who. The vocab stays 266. Growing the head would orphan the Atomizer. Runtime self-mod (`maybe_grow` / `add_expert`) still adds one zero-init expert near the dominant phase; `tick_chunk_train` now feeds the same hit counter as `tick`, so that path can fire during training, not only during single-tick generation. A CPU lock checks this: 32→48 width, 1→2 blocks, 2→4 experts, phase copy, tied head, backward, then one live `add_expert`. That is the mechanic. It is not a trained 1B.
+
 ## What this fork is
 
 Fractus CTE is not a transformer. It keeps a residual thought state `h`, advances it tick by tick through a stack of blocks (linear attention carry `(S, z)`, Kuramoto phase clock, phase-routed MoE), and emits a next-id distribution from a head tied to the input embedding.

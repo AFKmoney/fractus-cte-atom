@@ -126,6 +126,14 @@ def _transfer_block_weights(old_blk, new_blk, old_d: int, new_d: int):
     moe_new = new_blk.moe
     e_copy = min(moe_old.n_experts, moe_new.n_experts)
 
+    # Expert phases are the routing identity. A fresh Farey table on the new
+    # block would send old experts to different gates. Keep the copied rows.
+    if hasattr(moe_old, "expert_phases") and hasattr(moe_new, "expert_phases"):
+        old_ph = moe_old.expert_phases.data
+        new_ph = moe_new.expert_phases.data
+        n_copy = min(old_ph.shape[0], new_ph.shape[0], e_copy)
+        new_ph[:n_copy] = old_ph[:n_copy]
+
     if moe_old.expert_rank is not None and moe_new.expert_rank is not None:
         for param_name in ["U1", "V1", "U2", "V2", "scale1", "scale2", "b1", "b2"]:
             old_p = getattr(moe_old, param_name).data
@@ -220,6 +228,29 @@ def grow_cte(old_engine, new_config: Dict[str, Any]):
     # Output head is TIED with embedding — already handled above.
 
     return new_engine
+
+
+def grow_atom(old_engine, new_config: Dict[str, Any]):
+    """Grow width, depth, experts, oscillators. Never the Atom vocab.
+
+    The id stream is closed at 266 (bytes + specials + boundary markers).
+    Growing the head would orphan the tokenizer. Infinite growth is the
+    body: d_model, n_layers, n_experts, rank, oscillators. The head stays.
+    """
+    from .atom_tokenizer import VOCAB_SIZE
+
+    if old_engine.vocab_size != VOCAB_SIZE:
+        raise ValueError(
+            f"grow_atom requires vocab {VOCAB_SIZE}, got {old_engine.vocab_size}"
+        )
+    cfg = dict(new_config)
+    cfg["vocab_size"] = VOCAB_SIZE
+    grown = grow_cte(old_engine, cfg)
+    if grown.vocab_size != VOCAB_SIZE:
+        raise RuntimeError("grow_atom changed vocab")
+    if grown.output_head.weight.data_ptr() != grown.observe.weight.data_ptr():
+        grown.output_head.weight = grown.observe.weight
+    return grown
 
 
 def grow_summary(old_engine, new_engine) -> dict:

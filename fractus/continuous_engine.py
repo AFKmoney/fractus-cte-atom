@@ -518,6 +518,20 @@ class ContinuousThoughtEngine(nn.Module):
 
         self.thought_state = h[:, -1:, :].detach()
         logits = self.output_head(h)  # (B, C, vocab)
+
+        # Same hit counter as tick(), so maybe_grow can fire on the train path.
+        self._tick_count = getattr(self, "_tick_count", 0) + int(C)
+        n_exp = self.blocks[0].moe.n_experts
+        if not hasattr(self, "_expert_hits") or self._expert_hits.numel() != n_exp:
+            self._expert_hits = torch.zeros(n_exp)
+        with torch.no_grad():
+            gates = self.blocks[0].moe._compute_gates(
+                self.blocks[0].kuramoto_phases[:, 0:1, :]
+            )
+            topk_idx = gates.topk(self.blocks[0].moe.top_k, dim=-1).indices
+            for e in range(n_exp):
+                self._expert_hits[e] += (topk_idx == e).sum().item()
+
         return logits, total_lb
 
     def tick_chunk_train_ce(self, observations: torch.Tensor,
