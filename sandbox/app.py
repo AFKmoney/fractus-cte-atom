@@ -49,7 +49,7 @@ def get_engine():
             if _engine is None:
                 _tokenizer = FractusTokenizer.gpt2_compatible()
                 _engine = ContinuousThoughtEngine(
-                    vocab_size=50257, d_model=128, n_heads=4, d_head=32,
+                    vocab_size=266, d_model=128, n_heads=4, d_head=32,
                     n_layers=2, n_levels=2, n_oscillators=8, coupling_rank=4,
                     n_experts=8, top_k=2, expert_d_ff=128, siren_rank=32,
                 )

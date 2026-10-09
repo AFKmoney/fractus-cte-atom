@@ -19,7 +19,7 @@ ck = torch.load(ckpt, map_location="cpu", weights_only=False)
 sd = ck.get("model_state", ck)
 clean = {(k[10:] if k.startswith("_orig_mod.") else k): v for k, v in sd.items()}
 eng = ContinuousThoughtEngine(
-    vocab_size=50257, d_model=1280, n_layers=16, n_heads=20, d_head=64,
+    vocab_size=266, d_model=1280, n_layers=16, n_heads=20, d_head=64,
     n_levels=2, n_oscillators=16, coupling_rank=8, n_experts=128, top_k=2,
     expert_d_ff=2048, siren_rank=64,
 )

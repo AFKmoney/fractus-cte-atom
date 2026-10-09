@@ -185,7 +185,7 @@ def main():
             ckpt = torch.load(prev_ckpt, weights_only=False, map_location="cpu")
             prev_config = ckpt.get("config", {})
             engine = ContinuousThoughtEngine(
-                vocab_size=50257,
+                vocab_size=266,
                 d_model=prev_config.get("d_model", 128),
                 n_heads=prev_config.get("n_heads", 2),
                 d_head=prev_config.get("d_head", 64),
@@ -209,7 +209,7 @@ def main():
             # Palier 0: build from scratch (no checkpoint found).
             print(f"\n--- Building {palier_name} from scratch ---", flush=True)
             engine = ContinuousThoughtEngine(
-                vocab_size=50257, d_model=config["d_model"],
+                vocab_size=266, d_model=config["d_model"],
                 n_heads=config["n_heads"], d_head=64, n_levels=2,
                 n_layers=config["n_layers"],
                 n_oscillators=8, coupling_rank=4,

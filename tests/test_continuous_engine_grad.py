@@ -12,7 +12,7 @@ from fractus.continuous_engine import ContinuousThoughtEngine
 
 def _build_13m(n_layers=1):
     return ContinuousThoughtEngine(
-        vocab_size=50257, d_model=128, n_heads=2, d_head=64,
+        vocab_size=266, d_model=128, n_heads=2, d_head=64,
         n_layers=n_layers, n_levels=2, n_oscillators=8, coupling_rank=4,
         n_experts=4, top_k=2, expert_d_ff=128, siren_rank=32,
     )

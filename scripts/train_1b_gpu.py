@@ -238,7 +238,7 @@ def main():
         ckpt = torch.load(args.checkpoint, weights_only=False, map_location="cpu")
         cfg = ckpt["config"]
         engine = ContinuousThoughtEngine(
-            vocab_size=50257,
+            vocab_size=266,
             d_model=cfg["d_model"], n_heads=cfg["n_heads"],
             d_head=cfg.get("d_head", 64), n_levels=2,
             n_layers=cfg.get("n_layers", 1),
@@ -256,7 +256,7 @@ def main():
               f"params={sum(p.numel() for p in engine.parameters()):,}", flush=True)
     else:
         print("\nBuilding 1B from scratch (no checkpoint)", flush=True)
-        engine = ContinuousThoughtEngine(vocab_size=50257, **TARGET_1B)
+        engine = ContinuousThoughtEngine(vocab_size=266, **TARGET_1B)
         print(f"  params={sum(p.numel() for p in engine.parameters()):,}", flush=True)
 
     engine = engine.to(device)

@@ -45,7 +45,7 @@ def get_engine():
 
             tok = FractusTokenizer.gpt2_compatible()
             engine = ContinuousThoughtEngine(
-                vocab_size=50257, d_model=128,
+                vocab_size=266, d_model=128,
                 n_heads=4, d_head=32, n_levels=2,
                 n_oscillators=16, n_experts=8, top_k=2,
             )

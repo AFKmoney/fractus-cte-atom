@@ -77,7 +77,7 @@ ck = torch.load(CKPT_IN, map_location="cpu", weights_only=False)
 sd = ck.get("model_state", ck)
 clean = {(k[10:] if k.startswith("_orig_mod.") else k): v for k, v in sd.items()}
 
-eng = ContinuousThoughtEngine(vocab_size=50257, **{k: TARGET[k] for k in TARGET})
+eng = ContinuousThoughtEngine(vocab_size=266, **{k: TARGET[k] for k in TARGET})
 own = eng.state_dict()
 loaded = 0
 for k, v in clean.items():

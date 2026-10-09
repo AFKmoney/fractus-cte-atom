@@ -239,7 +239,7 @@ class RAGEngine:
                 idx = torch.multinomial(probs, 1).item()
                 next_token = ti[idx].item()
                 generated.append(next_token)
-                if next_token == 50256:  # <|endoftext|>
+                if next_token == 258:  # <|endoftext|>
                     break
 
         answer = self.tokenizer.decode(generated)

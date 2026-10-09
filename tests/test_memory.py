@@ -95,7 +95,7 @@ def test_memory_consolidate_if_salient_dedup():
 def test_cte_has_salience_head_and_memory_slot():
     from fractus.continuous_engine import ContinuousThoughtEngine
     eng = ContinuousThoughtEngine(
-        vocab_size=50257, d_model=128, n_heads=2, d_head=64, n_levels=2,
+        vocab_size=266, d_model=128, n_heads=2, d_head=64, n_levels=2,
         n_oscillators=8, coupling_rank=4, n_experts=4, top_k=2,
         expert_d_ff=128, siren_rank=32,
     )
@@ -108,7 +108,7 @@ def test_cte_has_salience_head_and_memory_slot():
 def test_cte_attach_detach_memory():
     from fractus.continuous_engine import ContinuousThoughtEngine
     eng = ContinuousThoughtEngine(
-        vocab_size=50257, d_model=128, n_heads=2, d_head=64, n_levels=2,
+        vocab_size=266, d_model=128, n_heads=2, d_head=64, n_levels=2,
         n_oscillators=8, coupling_rank=4, n_experts=4, top_k=2,
         expert_d_ff=128, siren_rank=32,
     )
@@ -122,7 +122,7 @@ def test_cte_attach_detach_memory():
 def test_cte_salience_head_outputs_in_range():
     from fractus.continuous_engine import ContinuousThoughtEngine
     eng = ContinuousThoughtEngine(
-        vocab_size=50257, d_model=128, n_heads=2, d_head=64, n_levels=2,
+        vocab_size=266, d_model=128, n_heads=2, d_head=64, n_levels=2,
         n_oscillators=8, coupling_rank=4, n_experts=4, top_k=2,
         expert_d_ff=128, siren_rank=32,
     )
@@ -138,7 +138,7 @@ def test_cte_salience_head_outputs_in_range():
 def test_cte_consolidates_when_salient():
     from fractus.continuous_engine import ContinuousThoughtEngine
     eng = ContinuousThoughtEngine(
-        vocab_size=50257, d_model=128, n_heads=2, d_head=64, n_levels=2,
+        vocab_size=266, d_model=128, n_heads=2, d_head=64, n_levels=2,
         n_oscillators=8, coupling_rank=4, n_experts=4, top_k=2,
         expert_d_ff=128, siren_rank=32,
     )
@@ -156,7 +156,7 @@ def test_cte_consolidates_when_salient():
 def test_cte_skips_consolidate_when_not_salient():
     from fractus.continuous_engine import ContinuousThoughtEngine
     eng = ContinuousThoughtEngine(
-        vocab_size=50257, d_model=128, n_heads=2, d_head=64, n_levels=2,
+        vocab_size=266, d_model=128, n_heads=2, d_head=64, n_levels=2,
         n_oscillators=8, coupling_rank=4, n_experts=4, top_k=2,
         expert_d_ff=128, siren_rank=32,
     )
@@ -174,7 +174,7 @@ def test_cte_skips_consolidate_when_not_salient():
 def test_cte_memory_active_toggle():
     from fractus.continuous_engine import ContinuousThoughtEngine
     eng = ContinuousThoughtEngine(
-        vocab_size=50257, d_model=128, n_heads=2, d_head=64, n_levels=2,
+        vocab_size=266, d_model=128, n_heads=2, d_head=64, n_levels=2,
         n_oscillators=8, coupling_rank=4, n_experts=4, top_k=2,
         expert_d_ff=128, siren_rank=32,
     )

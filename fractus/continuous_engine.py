@@ -264,7 +264,7 @@ class ContinuousThoughtEngine(nn.Module):
 
     def __init__(
         self,
-        vocab_size: int = 50257,
+        vocab_size: int = 266,
         d_model: int = 256,
         n_layers: int = 1,
         n_heads: int = 4,
@@ -336,7 +336,7 @@ class ContinuousThoughtEngine(nn.Module):
                     n_layers = max(n_layers, int(key.split(".")[1]) + 1)
 
         engine = cls(
-            vocab_size=cfg.get("vocab_size", 50257),
+            vocab_size=cfg.get("vocab_size", 266),
             d_model=cfg["d_model"],
             n_heads=cfg.get("n_heads", 4),
             d_head=cfg.get("d_head", 64),

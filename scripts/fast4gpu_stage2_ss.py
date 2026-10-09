@@ -21,7 +21,7 @@ print(f"GPU {GPU}: SS sequential LR={LR} SS_PROB={SS_PROB}", flush=True)
 ck = torch.load(f"checkpoints/fractus_1b_gpu{GPU}.pt", map_location="cpu", weights_only=False)
 sd = ck.get("model_state", ck)
 clean = {(k[10:] if k.startswith("_orig_mod.") else k): v for k,v in sd.items()}
-eng = ContinuousThoughtEngine(vocab_size=50257, **{k: TARGET[k] for k in TARGET})
+eng = ContinuousThoughtEngine(vocab_size=266, **{k: TARGET[k] for k in TARGET})
 own = eng.state_dict()
 for k,v in clean.items():
     if k in own and own[k].shape == v.shape:

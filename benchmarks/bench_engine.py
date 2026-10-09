@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fractus.continuous_engine import ContinuousThoughtEngine
 
 CONFIG = dict(
-    vocab_size=50257,
+    vocab_size=266,
     d_model=128,
     n_heads=2,
     d_head=64,

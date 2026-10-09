@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 
 from .farey import expert_phases
+from .lazy_siren import LazyStructuredSirenLinear
 
 
 def _gelu(x: torch.Tensor) -> torch.Tensor:
@@ -105,6 +106,27 @@ class PhaseRoutedMoE(nn.Module):
             self.scale2 = nn.Parameter(torch.ones(n_experts, 1, 1))
             self.b1 = nn.Parameter(torch.zeros(n_experts, d_ff))
             self.b2 = nn.Parameter(torch.zeros(n_experts, d_model))
+            # The class is the expert, not a comment. Same low-rank forward
+            # as the stacked U/V factors, one module per expert so grow and
+            # add_expert can append a body instead of a dead file.
+            self.siren_1 = nn.ModuleList([
+                LazyStructuredSirenLinear(d_model, d_ff, rank=expert_rank)
+                for _ in range(n_experts)
+            ])
+            self.siren_2 = nn.ModuleList([
+                LazyStructuredSirenLinear(d_ff, d_model, rank=expert_rank)
+                for _ in range(n_experts)
+            ])
+            with torch.no_grad():
+                for e in range(n_experts):
+                    self.siren_1[e].U.copy_(self.U1[e])
+                    self.siren_1[e].V.copy_(self.V1[e])
+                    self.siren_1[e].scale.copy_(self.scale1[e].reshape(()))
+                    self.siren_1[e].bias.copy_(self.b1[e])
+                    self.siren_2[e].U.copy_(self.U2[e])
+                    self.siren_2[e].V.copy_(self.V2[e])
+                    self.siren_2[e].scale.copy_(self.scale2[e].reshape(()))
+                    self.siren_2[e].bias.copy_(self.b2[e])
 
     def _compute_gates(self, phases: torch.Tensor) -> torch.Tensor:
         """Computes the von Mises gates for each token.
@@ -186,6 +208,17 @@ class PhaseRoutedMoE(nn.Module):
             self.scale2 = nn.Parameter(torch.cat([self.scale2.data, torch.zeros(1, 1, 1)]))
             self.b1 = nn.Parameter(torch.cat([self.b1.data, torch.zeros(1, self.d_ff)]))
             self.b2 = nn.Parameter(torch.cat([self.b2.data, torch.zeros(1, self.d_model)]))
+            if getattr(self, "siren_1", None) is not None:
+                fresh_1 = LazyStructuredSirenLinear(self.d_model, self.d_ff, rank=r)
+                fresh_2 = LazyStructuredSirenLinear(self.d_ff, self.d_model, rank=r)
+                with torch.no_grad():
+                    for fresh in (fresh_1, fresh_2):
+                        fresh.U.zero_()
+                        fresh.V.zero_()
+                        fresh.scale.zero_()
+                        fresh.bias.zero_()
+                self.siren_1.append(fresh_1)
+                self.siren_2.append(fresh_2)
 
         self.n_experts = new_E
         return old_E  # index of the new expert
@@ -210,6 +243,24 @@ class PhaseRoutedMoE(nn.Module):
         # Gather the K selected experts' weights PER TOKEN.
         flat_idx = topk_idx.reshape(-1)  # (B*L*K,)
 
+        if self.expert_rank is not None and getattr(self, "siren_1", None) is not None:
+            # Selected experts go through LazyStructuredSirenLinear. This is
+            # the body, not a parallel einsum that leaves the class unused.
+            picked = []
+            for k in range(K):
+                idx = topk_idx[:, :, k]  # (B, L)
+                # One module call per expert index that appears. Positions
+                # that did not select it stay zero and are gathered back.
+                acc = h.new_zeros(B, L, D)
+                for e in idx.unique().tolist():
+                    mask = idx == e
+                    if not mask.any():
+                        continue
+                    h1 = _gelu(self.siren_1[e](h))
+                    ye = self.siren_2[e](h1)
+                    acc = acc + ye * mask.unsqueeze(-1).to(ye.dtype)
+                picked.append(acc)
+            return torch.stack(picked, dim=2)
         if self.expert_rank is not None:
             # Sparse LOW-RANK path: gather U/V/scale factors, compute 2 matmuls per expert.
             # This computes only K experts instead of E — at top-k=2, E=128, that's 64x less work.
@@ -273,6 +324,15 @@ class PhaseRoutedMoE(nn.Module):
         #   contracting r: h1[b,l,e,f] = Σ_r hV1[b,l,e,r]·U1[e,f,r] = (h@V1)·U1ᵀ.
         #   scale1 is stored (E,1,1) (spec D1); reshape to (1,1,E,1) so it
         #   broadcasts over the E dim of (B,L,E,F) — mirroring the b1 reshape.
+        # Low-rank layer 1 goes through LazyStructuredSirenLinear when the
+        # modules are present. Stacked U/V stay for the sparse gather path
+        # and for grow's row copy; the siren modules are the named body.
+        if getattr(self, "siren_1", None) is not None:
+            outs = []
+            for e in range(self.n_experts):
+                h1 = _gelu(self.siren_1[e](h))
+                outs.append(self.siren_2[e](h1))
+            return torch.stack(outs, dim=2)
         hV1 = torch.einsum("bld,edr->bler", h, self.V1)            # (B,L,E,r)
         h1 = self.scale1.view(1, 1, self.n_experts, 1) * torch.einsum("bler,efr->blef", hV1, self.U1) + self.b1.view(1, 1, self.n_experts, self.d_ff)
         h1_act = _gelu(h1)

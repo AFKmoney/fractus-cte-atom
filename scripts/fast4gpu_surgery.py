@@ -30,7 +30,7 @@ sd = ck.get("model_state", ck)
 clean = {(k[10:] if k.startswith("_orig_mod.") else k): v for k,v in sd.items()}
 
 eng = ContinuousThoughtEngine(
-    vocab_size=50257, **{k: TARGET[k] for k in [
+    vocab_size=266, **{k: TARGET[k] for k in [
         'd_model','n_heads','d_head','n_levels','n_oscillators','coupling_rank',
         'n_experts','top_k','expert_d_ff','siren_rank','n_layers']}
 )
