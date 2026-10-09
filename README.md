@@ -36,7 +36,7 @@ Three properties, and they are the product, not a slogan.
 
 What was accepted for this fork: Atomizer spans adapted to Fractus integer ticks, vocab 266, train from scratch, x8 left untouched. Packet features (320-d) stay off the id stream. The boundary marker is the Atomizer decision the head can see.
 
-**It grows without bound, in the body only.** `grow_atom` zero-pads a trained engine into a larger one: `d_model`, depth, experts, oscillator count, coupling rank. Old rows are copied, new rows start neutral, expert phases of the copied experts are kept so the router does not forget who was who. The vocab stays 266. Growing the head would orphan the Atomizer. Runtime self-mod (`maybe_grow` / `add_expert`) still adds one zero-init expert near the dominant phase; `tick_chunk_train` now feeds the same hit counter as `tick`, so that path can fire during training, not only during single-tick generation. A CPU lock checks this: 32→48 width, 1→2 blocks, 2→4 experts, phase copy, tied head, backward, then one live `add_expert`. That is the mechanic. It is not a trained 1B.
+The Atom entry point is `fractus/atom_session.py`. It is the only constructor that builds the original body on vocab 266: engine, Kuramoto routing fix, persistent memory, cognitive-mode classifier, knowledge base and RAG retriever, `grow_atom`, `maybe_grow`, and greedy-prefix generation. `generate_with_surgery` is reachable from the same session and is not the speech gate. `scripts/train_atom_from_scratch.py` still trains a fresh head; the session is what a run must hold if memory, routing fix, modes, and retrieval are supposed to be live. A CPU checklist fires each of those once.
 
 ## What this fork is
 
