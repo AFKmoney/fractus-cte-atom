@@ -85,7 +85,29 @@ def generate_chunk(engine, tokenizer, prompt: str, max_new: int = 40, **kw):
     return generate_window(engine, tokenizer, prompt, max_new=max_new, window=128, **kw)
 
 @torch.no_grad()
-def unique40_probe(engine, max_new=40, mode="prefix", prompts=None):
-    return {"mode": mode, "max_new": max_new}
+def unique40_probe(engine, max_new=40, mode="prefix", prompts=None, tokenizer=None):
+    """Greedy PREFIX probe. Counts unique ids over the generated span.
+
+    The previous body returned the arguments and generated nothing. The gate
+    is this function. tokenizer is required on the Atom fork: ids are bytes,
+    so unique ids and unique bytes are the same count.
+    """
+    if tokenizer is None:
+        from .tokenizer import FractusTokenizer
+        tokenizer = FractusTokenizer()
+    prompts = prompts or ["Bonjour", "The ", "def "]
+    rows = []
+    for prompt in prompts:
+        if mode == "prefix":
+            text, ids = generate_greedy_prefix(engine, tokenizer, prompt, max_new=max_new)
+        else:
+            text, ids = generate_window(engine, tokenizer, prompt, max_new=max_new, temperature=0.0, top_k=1)
+        rows.append({
+            "prompt": prompt,
+            "text": text,
+            "unique": len(set(ids)),
+            "n": len(ids),
+        })
+    return {"mode": mode, "max_new": max_new, "rows": rows}
 
 # space-sync 2026-08-29b force_second carry

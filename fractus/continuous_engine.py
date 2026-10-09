@@ -284,6 +284,11 @@ class ContinuousThoughtEngine(nn.Module):
 
         # Input embedding.
         self.observe = nn.Embedding(vocab_size, d_model)
+        # Atomizer packet features (320) added at the id that carries them.
+        # Zero init: a run that does not pass features is unchanged.
+        self.atom_feat = nn.Linear(320, d_model)
+        nn.init.zeros_(self.atom_feat.weight)
+        nn.init.zeros_(self.atom_feat.bias)
 
         # Multi-block stack.
         self.blocks = nn.ModuleList([
@@ -479,12 +484,14 @@ class ContinuousThoughtEngine(nn.Module):
         output_logits = self.output_head(h[:, 0, :])
         return output_logits, confidence
 
-    def tick_chunk(self, observations: torch.Tensor) -> torch.Tensor:
+    def tick_chunk(self, observations: torch.Tensor, feat: torch.Tensor = None) -> torch.Tensor:
         """Process a CHUNK of tokens through all blocks. Returns logits (B, C, vocab)."""
         B, C = observations.shape
         D = self.d_model
 
         obs_vecs = self.observe(observations)
+        if feat is not None:
+            obs_vecs = obs_vecs + self.atom_feat(feat)
         h = obs_vecs.clone()
         h[:, 0, :] = h[:, 0, :] + self.thought_state[:, 0, :]
 
@@ -498,7 +505,7 @@ class ContinuousThoughtEngine(nn.Module):
         output_logits = self.output_head(h)
         return output_logits
 
-    def tick_chunk_train(self, observations: torch.Tensor) -> torch.Tensor:
+    def tick_chunk_train(self, observations: torch.Tensor, feat: torch.Tensor = None) -> torch.Tensor:
         """Train over the full chunk: logits (B, C, vocab) for dense next-token CE.
 
         Stage-2 surgery: supervise every position so the model must chain tokens,
@@ -507,6 +514,8 @@ class ContinuousThoughtEngine(nn.Module):
         B, C = observations.shape
 
         obs_vecs = self.observe(observations)
+        if feat is not None:
+            obs_vecs = obs_vecs + self.atom_feat(feat)
         h = obs_vecs.clone()
         h[:, 0, :] = h[:, 0, :] + self.thought_state[:, 0, :]
 
@@ -538,7 +547,8 @@ class ContinuousThoughtEngine(nn.Module):
                             targets: torch.Tensor,
                             ce_chunk: int = 8192,
                             return_hidden: bool = False,
-                            block_ckpt: bool = False) -> tuple:
+                            block_ckpt: bool = False,
+                            feat: torch.Tensor = None) -> tuple:
         """Like tick_chunk_train but returns (mean_ce, lb_loss) directly.
 
         Uses fractus.nn.ce.chunked_cross_entropy so full-vocab logits are
@@ -564,6 +574,8 @@ class ContinuousThoughtEngine(nn.Module):
         from .nn.ce import chunked_cross_entropy
 
         obs_vecs = self.observe(observations)
+        if feat is not None:
+            obs_vecs = obs_vecs + self.atom_feat(feat)
         h = obs_vecs.clone()
         h[:, 0, :] = h[:, 0, :] + self.thought_state[:, 0, :]
 

@@ -22,12 +22,14 @@ def v4_forward_losses(
     repeat_coef: float = 0.1,
     ce_chunk: int = 2048,
     block_ckpt: bool = False,
+    feat: torch.Tensor = None,
 ):
     """Teacher-forced losses. Returns (total, extras_dict). extras has tensors
     with grad: ce, lb, repeat, h.
     """
     out = eng.tick_chunk_train_ce(
         chunk, target, ce_chunk=ce_chunk, return_hidden=True, block_ckpt=block_ckpt,
+        feat=feat,
     )
     ce, lb, h = out
     weight = eng.output_head.weight

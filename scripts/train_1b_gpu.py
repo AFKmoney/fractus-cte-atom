@@ -237,6 +237,11 @@ def main():
         # Build a model matching the checkpoint config, load, then grow.
         ckpt = torch.load(args.checkpoint, weights_only=False, map_location="cpu")
         cfg = ckpt["config"]
+        if cfg.get("vocab_size", 50257) != 266:
+            raise SystemExit(
+                "train_1b_gpu on this fork refuses a non-Atom checkpoint. "
+                "x8 weights are vocab 50257. Use scripts/train_atom_from_scratch.py."
+            )
         engine = ContinuousThoughtEngine(
             vocab_size=266,
             d_model=cfg["d_model"], n_heads=cfg["n_heads"],

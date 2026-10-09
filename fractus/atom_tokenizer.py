@@ -85,5 +85,23 @@ class AtomFractusTokenizer:
     def payload_bytes(self, ids: Sequence[int]) -> bytes:
         return bytes(i for i in ids if 0 <= int(i) < 256)
 
-    def encode_batch(self, texts: Iterable[str]) -> List[List[int]]:
-        return [self.encode(text) for text in texts]
+    def encode_with_features(self, text: str, add_specials: bool = True):
+        """Ids plus a (L, 320) feature row. Features sit on the boundary id."""
+        import torch
+        packets = self.atomizer.encode(text, reset=True)
+        ids: List[int] = [BOS] if add_specials else []
+        rows = []
+        if add_specials:
+            rows.append(torch.zeros(self.atomizer.FEATURE_DIM))
+        for packet in packets:
+            ids.extend(packet.payload)
+            rows.extend(torch.zeros(self.atomizer.FEATURE_DIM) for _ in packet.payload)
+            code = Atomizer._BOUNDARY_CODES.get(packet.boundary, 0)
+            if code:
+                ids.append(BOUNDARY_BASE + code)
+                rows.append(packet.features.detach().float().cpu())
+        if add_specials:
+            ids.append(EOS)
+            rows.append(torch.zeros(self.atomizer.FEATURE_DIM))
+        feat = torch.stack(rows) if rows else torch.zeros(0, self.atomizer.FEATURE_DIM)
+        return ids, feat

@@ -40,6 +40,22 @@ def _pad_last_dim(tensor: torch.Tensor, new_size: int) -> torch.Tensor:
     return torch.cat([tensor, pad], dim=-1)
 
 
+def _sync_siren_from_factors(moe, n_copy: int) -> None:
+    """Make the Siren modules match the stacked factors the grow just copied."""
+    if not hasattr(moe, "siren_1"):
+        return
+    with torch.no_grad():
+        for e in range(min(n_copy, len(moe.siren_1), len(moe.siren_2))):
+            moe.siren_1[e].U.copy_(moe.U1[e])
+            moe.siren_1[e].V.copy_(moe.V1[e])
+            moe.siren_1[e].scale.copy_(moe.scale1[e].reshape(()))
+            moe.siren_1[e].bias.copy_(moe.b1[e])
+            moe.siren_2[e].U.copy_(moe.U2[e])
+            moe.siren_2[e].V.copy_(moe.V2[e])
+            moe.siren_2[e].scale.copy_(moe.scale2[e].reshape(()))
+            moe.siren_2[e].bias.copy_(moe.b2[e])
+
+
 def _transfer_block_weights(old_blk, new_blk, old_d: int, new_d: int):
     """Transfer weights from old CTEBlock to new CTEBlock via zero-padding.
 
@@ -152,6 +168,9 @@ def _transfer_block_weights(old_blk, new_blk, old_d: int, new_d: int):
             if param_name in ("scale1", "scale2"):
                 old_scale = getattr(moe_old, param_name).data[:e_copy]
                 new_p[:e_copy] = old_scale
+        # The forward reads LazyStructuredSirenLinear, not the stacked U/V.
+        # After the row copy, push those rows into the modules that compute.
+        _sync_siren_from_factors(moe_new, e_copy)
 
 
 def grow_cte(old_engine, new_config: Dict[str, Any]):

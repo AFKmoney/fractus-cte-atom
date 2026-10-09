@@ -29,6 +29,10 @@ import torch.nn.functional as F
 
 from fractus.atom_tokenizer import VOCAB_SIZE, AtomFractusTokenizer
 from fractus.continuous_engine import ContinuousThoughtEngine
+from fractus.grow import grow_atom
+from fractus.kuramoto_fix import apply_kuramoto_routing_fix
+from fractus.train.ar_loss import ss_prob_at
+from fractus.train.v4_step import should_ss, v4_forward_losses, v4_ss_pass
 
 SCALE = {
     "smoke": dict(
@@ -51,9 +55,10 @@ SMOKE_TEXT = (
 ) * 8
 
 
-def load_ids(path: str | None, tok: AtomFractusTokenizer) -> torch.Tensor:
+def load_stream(path: str | None, tok: AtomFractusTokenizer):
     if not path:
-        return torch.tensor(tok.encode(SMOKE_TEXT), dtype=torch.long)
+        ids, feat = tok.encode_with_features(SMOKE_TEXT)
+        return torch.tensor(ids, dtype=torch.long), feat
     if path.endswith(".i16"):
         arr = np.fromfile(path, dtype=np.int16)
     elif path.endswith(".npy"):
@@ -62,7 +67,7 @@ def load_ids(path: str | None, tok: AtomFractusTokenizer) -> torch.Tensor:
         raise SystemExit(f"unsupported corpus: {path}")
     if arr.size and int(arr.max()) >= VOCAB_SIZE:
         raise SystemExit("corpus id >= vocab 266 — this is not an Atom stream")
-    return torch.as_tensor(np.asarray(arr, dtype=np.int64))
+    return torch.as_tensor(np.asarray(arr, dtype=np.int64)), None
 
 
 def main():
@@ -75,17 +80,20 @@ def main():
     ap.add_argument("--out", default="checkpoints/atom_scratch")
     ap.add_argument("--max-span-bytes", type=int, default=32)
     ap.add_argument("--pack-mode", default="linguistic")
+    ap.add_argument("--grow-at", type=int, default=-1, help="step at which the body grows by one layer")
+    ap.add_argument("--ss-rate", type=float, default=0.0)
     args = ap.parse_args()
 
     tok = AtomFractusTokenizer(
         max_span_bytes=args.max_span_bytes, pack_mode=args.pack_mode
     )
-    ids = load_ids(args.corpus, tok)
+    ids, feat = load_stream(args.corpus, tok)
     if ids.numel() < args.seq_len + 1:
         raise SystemExit("corpus shorter than seq-len+1")
 
     cfg = dict(SCALE[args.scale])
     engine = ContinuousThoughtEngine(vocab_size=VOCAB_SIZE, **cfg)
+    routing = apply_kuramoto_routing_fix(engine, log=lambda *_: None)
     n_params = sum(p.numel() for p in engine.parameters())
     opt = torch.optim.AdamW(engine.parameters(), lr=args.lr, weight_decay=0.01)
     engine.train()
@@ -93,22 +101,35 @@ def main():
     losses = []
     t0 = time.time()
     n = ids.numel()
+    grew_at = None
     for step in range(args.steps):
+        if step == args.grow_at:
+            engine = grow_atom(engine, {"n_layers": engine.n_layers + 1})
+            opt = torch.optim.AdamW(engine.parameters(), lr=args.lr, weight_decay=0.01)
+            grew_at = step
         start = (step * args.seq_len) % (n - args.seq_len - 1)
         chunk = ids[start:start + args.seq_len].unsqueeze(0)
         target = ids[start + 1:start + 1 + args.seq_len]
+        feat_chunk = None
+        if feat is not None:
+            feat_chunk = feat[start:start + args.seq_len].unsqueeze(0)
         engine.reset_thought(batch_size=1)
-        logits, lb = engine.tick_chunk_train(chunk)
-        ce = F.cross_entropy(logits.reshape(-1, VOCAB_SIZE), target)
-        loss = ce + 0.01 * lb
+        loss, extras = v4_forward_losses(engine, chunk, target, feat=feat_chunk)
+        if args.ss_rate and should_ss(args.ss_rate):
+            ss_loss, _ = v4_ss_pass(
+                engine, chunk, target, extras["h"],
+                ss_prob=ss_prob_at(step * args.seq_len),
+            )
+            loss = loss + ss_loss
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(engine.parameters(), 1.0)
         opt.step()
-        losses.append(float(ce.detach()))
+        losses.append(float(extras["ce"].detach()))
         if step % max(1, args.steps // 5) == 0 or step == args.steps - 1:
             print(
-                f"step {step} ce {float(ce.detach()):.4f} lb {float(lb.detach()):.4f}",
+                f"step {step} ce {losses[-1]:.4f} lb {float(extras['lb'].detach()):.4f} "
+                f"repeat {float(extras['repeat'].detach()):.4f}",
                 flush=True,
             )
 
@@ -127,6 +148,9 @@ def main():
             "steps": args.steps,
             "start_token": 0,
             "parent": "hf:thefinalboss/fractus-cte",
+            "loop": "v4_forward_losses",
+            "kuramoto_fix": routing,
+            "grew_at": grew_at,
             "note": "from scratch. not an x8 resume.",
         },
         ckpt,
