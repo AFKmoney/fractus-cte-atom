@@ -1,0 +1,9 @@
+{
+  "init_ce": 5.592,
+  "echo_frac": 0.0,
+  "target_ln_266": 5.583,
+  "embed_std": 0.02,
+  "corpus_tokens": 1059743,
+  "corpus": "data/atom_corpus.i16",
+  "note": "Starter Atom corpus from atom-ai French text, two files. Not the phase-2 3.44B stream. Init checkpoint is produced by the engine constructor, not loaded from x8."
+}

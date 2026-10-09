@@ -1,0 +1,11 @@
+{
+  "tokenizer": "atom-fractus-v1",
+  "vocab_size": 266,
+  "max_span_bytes": 32,
+  "pack_mode": "linguistic",
+  "docs": 2,
+  "tokens": 1059743,
+  "bin": "atom_corpus.i16",
+  "dtype": "int16",
+  "note": "fresh Atom id stream. Do not mix with GPT-2 50257 shards."
+}

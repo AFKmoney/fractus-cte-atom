@@ -284,6 +284,10 @@ class ContinuousThoughtEngine(nn.Module):
 
         # Input embedding.
         self.observe = nn.Embedding(vocab_size, d_model)
+        # Tied head reads h @ E. Default N(0,1) makes h contain the input
+        # row, so step-0 next-token CE is ~60 and echo is 1. N(0, 0.02)
+        # leaves the head uninformed: CE near ln(vocab).
+        nn.init.normal_(self.observe.weight, mean=0.0, std=0.02)
         # Atomizer packet features (320) added at the id that carries them.
         # Zero init: a run that does not pass features is unchanged.
         self.atom_feat = nn.Linear(320, d_model)
