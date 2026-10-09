@@ -13,9 +13,12 @@ def _reset(engine):
         if hasattr(blk, "attn_z"):
             blk.attn_z.zero_()
 
-def _pick(logits: torch.Tensor, prev: Optional[int], temperature: float, top_k: int) -> int:
+def _pick(logits: torch.Tensor, prev: Optional[int], temperature: float, top_k: int, ban_prev: bool = False) -> int:
     l = logits.float().reshape(-1).clone()
-    if prev is not None and 0 <= prev < l.numel():
+    # Atom ids are bytes. Banning the previous id forbids double letters,
+    # spaces and UTF-8 runs, and forces ntntnt. The speech gate is greedy
+    # PREFIX with no ban. ban_prev stays available for a cycle probe.
+    if ban_prev and prev is not None and 0 <= prev < l.numel():
         l[prev] = -1e9
     if temperature <= 1e-5:
         return int(l.argmax().item())
@@ -37,38 +40,56 @@ def generate_window(
     carry: bool = False,
 ) -> tuple[str, List[int]]:
     ids = tokenizer.encode(prompt)[:window] or [0]
+    feat = None
+    opener = getattr(tokenizer, "encode_open", None) or getattr(getattr(tokenizer, "_atom", None), "encode_open", None)
+    if opener is not None:
+        ids, feat = opener(prompt)
+        ids = ids[:window] or [0]
+        feat = feat[: len(ids)]
+    elif hasattr(tokenizer, "encode_with_features"):
+        ids, feat = tokenizer.encode_with_features(prompt)
+        ids = ids[:window] or [0]
+        feat = feat[: len(ids)]
     out: List[int] = []
     prev = ids[-1]
     if carry:
         _reset(engine)
-        logits = engine.tick_chunk(torch.tensor([ids], dtype=torch.long))
+        ctx_feat = feat.unsqueeze(0) if feat is not None else None
+        logits = engine.tick_chunk(torch.tensor([ids], dtype=torch.long), feat=ctx_feat)
         cur = logits[0, -1]
         for i in range(max_new):
             if force_second and i == 0:
                 l = cur.float().clone()
                 l[int(l.argmax())] = -1e9
-                nxt = _pick(l, prev=prev, temperature=temperature, top_k=top_k)
+                nxt = _pick(l, prev=prev, temperature=temperature, top_k=top_k, ban_prev=False)
             else:
-                nxt = _pick(cur, prev=prev, temperature=temperature, top_k=top_k)
+                nxt = _pick(cur, prev=prev, temperature=temperature, top_k=top_k, ban_prev=False)
             out.append(nxt)
             ids.append(nxt)
-            logits = engine.tick_chunk(torch.tensor([[nxt]], dtype=torch.long))
+            logits = engine.tick_chunk(torch.tensor([[nxt]], dtype=torch.long), feat=None)
             cur = logits[0, -1]
             prev = nxt
     else:
         for i in range(max_new):
             _reset(engine)
             ctx = ids[-window:]
-            logits = engine.tick_chunk(torch.tensor([ctx], dtype=torch.long))
+            ctx_feat = None
+            if feat is not None:
+                ctx_feat = feat[-len(ctx):].unsqueeze(0)
+                if ctx_feat.shape[1] != len(ctx):
+                    ctx_feat = None
+            logits = engine.tick_chunk(torch.tensor([ctx], dtype=torch.long), feat=ctx_feat)
             cur = logits[0, -1]
             if force_second and i == 0:
                 l = cur.float().clone()
                 l[int(l.argmax())] = -1e9
-                nxt = _pick(l, prev=prev, temperature=temperature, top_k=top_k)
+                nxt = _pick(l, prev=prev, temperature=temperature, top_k=top_k, ban_prev=False)
             else:
-                nxt = _pick(cur, prev=prev, temperature=temperature, top_k=top_k)
+                nxt = _pick(cur, prev=prev, temperature=temperature, top_k=top_k, ban_prev=False)
             out.append(nxt)
             ids.append(nxt)
+            if feat is not None:
+                feat = torch.cat([feat, torch.zeros(1, feat.shape[-1])], dim=0)
             prev = nxt
     return tokenizer.decode(out), out
 

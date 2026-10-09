@@ -85,6 +85,29 @@ class AtomFractusTokenizer:
     def payload_bytes(self, ids: Sequence[int]) -> bytes:
         return bytes(i for i in ids if 0 <= int(i) < 256)
 
+    def encode_open(self, text: str):
+        """Prefix for generation. No EOS, no closing boundary on the tail.
+
+        A closed encode puts EOS after the prompt, so the model thinks the
+        text is finished and never continues the span it trained on.
+        """
+        import torch
+        packets = self.atomizer.encode_bytes(text.encode("utf-8"), reset=True, flush=False)
+        ids: List[int] = [BOS]
+        rows = [torch.zeros(self.atomizer.FEATURE_DIM)]
+        for packet in packets:
+            ids.extend(packet.payload)
+            rows.extend(torch.zeros(self.atomizer.FEATURE_DIM) for _ in packet.payload)
+            code = Atomizer._BOUNDARY_CODES.get(packet.boundary, 0)
+            if code:
+                ids.append(BOUNDARY_BASE + code)
+                rows.append(packet.features.detach().float().cpu())
+        tail = bytes(self.atomizer._buffer)
+        ids.extend(tail)
+        rows.extend(torch.zeros(self.atomizer.FEATURE_DIM) for _ in tail)
+        feat = torch.stack(rows) if rows else torch.zeros(0, self.atomizer.FEATURE_DIM)
+        return ids, feat
+
     def encode_with_features(self, text: str, add_specials: bool = True):
         """Ids plus a (L, 320) feature row. Features sit on the boundary id."""
         import torch
