@@ -16,121 +16,106 @@ pipeline_tag: text-generation
 
 # Fractus CTE-Atom
 
-A fork of the Hugging Face Fractus Continuous Thought Engine, with ATOM's Atomizer in place of GPT-2 BPE. This repository is a **new model**, trained from zero. It is not a resume of the x8 run.
+A fork of the Hugging Face Fractus Continuous Thought Engine. The only change to the brain is the tokenizer: GPT-2 BPE is gone, the Atomizer is the id stream. This is a new model, trained from zero. It is not a resume of the x8 run.
 
 Engine source: [`thefinalboss/fractus-cte`](https://huggingface.co/thefinalboss/fractus-cte).
 GitHub: [`AFKmoney/fractus-cte-atom`](https://github.com/AFKmoney/fractus-cte-atom).
-ATOM Atomizer source: [`AFKmoney/atom-ai`](https://github.com/AFKmoney/atom-ai) `src/io/atomizer.py`, vendored here as `fractus/atomizer.py`.
+Atomizer source: [`AFKmoney/atom-ai`](https://github.com/AFKmoney/atom-ai), vendored as `fractus/atomizer.py`.
 
 No x8 checkpoint is in this repo. Do not load one.
 
 ## Philosophy
 
-Three properties, and they are the product, not a slogan.
+Three properties, and they are the product.
 
-**It thinks continuously.** Fractus is not a one-shot function from prompt to completion. A tick advances a residual thought `h` through the block stack. Attention carry `(S, z)` and Kuramoto phase stay live across chunks. Output is a next-id distribution on that state, not a separate decode graph. The Atomizer does not change this. It only changes what an id is.
+**It thinks continuously.** A tick advances a residual thought `h` through the block stack. Attention carry `(S, z)` and Kuramoto phase stay live across chunks. Output is a next-id distribution on that state. The Atomizer does not change this. It only changes what an id is.
 
-**It trains without a finish line.** The checkpoint is a seed, not a release cut. This fork starts at token 0 because the head is new. After that, training only moves forward: same weights, same Atom id stream, next offset written into the checkpoint. There is no "done" step that freezes the brain and throws away the trainer. Infinite here means unbounded continuation, not a promise that a given run never crashes.
+**It trains without a finish line.** The checkpoint is a seed. This fork starts at token 0 because the head is new. After that, training only moves forward. Infinite means unbounded continuation, not a promise that a run never crashes.
 
-**It opens quickly.** The parent model paid ~128M parameters for a GPT-2 head of 50257 ids before a single block ran. This fork's head is 266 ids (`266 × 1280 ≈ 0.34M` tied embed). Load is the block stack plus a byte-span tokenizer with no merge table and no Hugging Face tokenizer runtime. Startup cost is the CTE weights, not a 50k vocab.
+**It opens quickly.** The parent paid about 128M parameters for a 50257-id head before a block ran. This head is 266 ids (`266 × 1280 ≈ 0.34M` tied). No merge table. No Hugging Face tokenizer runtime.
 
-What was accepted for this fork: Atomizer spans adapted to Fractus integer ticks, vocab 266, train from scratch, x8 left untouched. Packet features (320-d) stay off the id stream. The boundary marker is the Atomizer decision the head can see.
+## What was done
 
-The Atom entry point is `fractus/atom_session.py`. It is the only constructor that builds the original body on vocab 266: engine, Kuramoto routing fix, persistent memory, cognitive-mode classifier, knowledge base and RAG retriever, `grow_atom`, `maybe_grow`, and greedy-prefix generation. `generate_with_surgery` is reachable from the same session and is not the speech gate. `scripts/train_atom_from_scratch.py` still trains a fresh head; the session is what a run must hold if memory, routing fix, modes, and retrieval are supposed to be live. A CPU checklist fires each of those once.
+The parent body is intact and on the Atom path.
 
-## What this fork is
-
-Fractus CTE is not a transformer. It keeps a residual thought state `h`, advances it tick by tick through a stack of blocks (linear attention carry `(S, z)`, Kuramoto phase clock, phase-routed MoE), and emits a next-id distribution from a head tied to the input embedding.
-
-The Hugging Face engine is the one that was actually trained. Its public tokenizer is GPT-2 byte-level BPE, vocab **50257**. That choice dominates the parameter count: the tied embed/head is about `2 × 50257 × 1280` parameters, on the order of 128M, before the blocks.
-
-ATOM does not have a vocabulary. `Atomizer` (`atomizer-v1-byte-span`) cuts a raw UTF-8 byte stream into reversible spans on structural boundaries (whitespace, punctuation, newline, alpha/digit transition, max span, end of stream). Each span is an `AtomPacket`: payload bytes, boundary name, phase, and a 320-d feature vector. Two equal surface spans can still differ in features, because features include a rolling context sketch. The packet is an event, not a permanent vocab row.
-
-Fractus cannot consume that packet directly. `observe` is `nn.Embedding(vocab, d)` and `output_head` is tied to it, so every tick must be one integer in `[0, vocab)`. This fork adapts the Atomizer **to that contract**. It does not turn Fractus into the toroidal field, and it does not turn ATOM into a transformer.
+- `FractusTokenizer` is the Atomizer. Vocab is 266. `gpt2_compatible()` returns Atom on purpose, so old call sites cannot silently build a 50257 head.
+- `LazyStructuredSirenLinear` is the MoE expert, not a comment. Two modules per expert, on the dense and sparse forwards. After `grow_atom`, those modules are copied from the stacked factors, so the body that computes is the body that grew.
+- Fractal linear attention is on the train forward: QKV, level offsets, ELU feature map, causal linear attention, softmax over `level_logits`, carry `(S, z)`.
+- Kuramoto routing fix (gate temperature 2.5, omega ×4) runs at the start of `scripts/train_atom_from_scratch.py`.
+- The train loop is `v4_forward_losses`: chunked CE, load-balance, anti-repeat, optional scheduled sampling. `--grow-at N` adds a layer and rebuilds the optimizer.
+- Packet features (320-d) enter through `atom_feat`, zero-init, placed on the boundary id. A run that does not pass features is unchanged.
+- Embedding init is `N(0, 0.02)`. Step-0 next-token CE measured **5.592**, echo fraction **0.0**. Target is `ln(266) ≈ 5.583`.
+- Speech path: greedy PREFIX does not ban the previous id. A prompt is an open prefix (`encode_open`): no EOS, no closing boundary on the tail. A closed encode made the model think the text was finished.
+- A memorized short phrase spoke. Prompt `abcdef `, output `Fractus 12345.`. Teacher-forced accuracy on that phrase was 1. This proves the path can emit a continuation it learned. It is not a 1B speech claim.
+- Starter corpus: `data/atom_corpus.i16`, 1,059,743 Atom ids, two French files. Not the phase-2 3.44B stream.
+- `scripts/pod_atom_from_scratch.sh` refuses to run unless `ATOM_POD=1` is set on a machine that already has the GPU. It does not open a pod.
+- `scripts/train_1b_gpu.py` refuses a checkpoint whose vocab is not 266.
 
 ## The id stream
 
-`fractus/atom_tokenizer.py` (`atom-fractus-v1`):
-
 | ids | meaning |
 |---|---|
-| 0–255 | one raw UTF-8 byte from the packet payload |
+| 0–255 | one raw UTF-8 byte |
 | 256 | PAD |
 | 257 | BOS |
 | 258 | EOS |
-| 259–265 | boundary marker after each span |
+| 259–265 | boundary marker after a span |
 
-Boundary ids are `258 + Atomizer._BOUNDARY_CODES[name]`:
+Boundary ids are `258 + Atomizer._BOUNDARY_CODES[name]`: whitespace 259, punctuation 260, newline 261, class_transition 262, max_span 263, eos-flush 264, generated 265.
 
-| id | boundary |
-|---|---|
-| 259 | whitespace |
-| 260 | punctuation |
-| 261 | newline |
-| 262 | class_transition |
-| 263 | max_span |
-| 264 | eos (flush of a pending span) |
-| 265 | generated (not used on the train path) |
+Closed encode (training documents): `[BOS] + (payload bytes + boundary id) × packets + [EOS]`.
+Open encode (generation prompts): `[BOS] + committed packets + tail bytes`. No EOS. No boundary on the unflushed tail.
 
-Default pack: `linguistic`, `max_span_bytes=32`. Encode is `[BOS] + (payload bytes + boundary id) × packets + [EOS]`. Decode drops every id `≥ 256` and UTF-8-decodes the surviving bytes. Round-trip is exact on the bytes, including French and code, as long as the Atomizer does not split a code point (it does not, except the explicit byte-tick mode `max_span_bytes=1`).
+Decode drops every id `≥ 256` and UTF-8-decodes the rest. Round-trip on the bytes is exact.
 
-There is no learned merge table and no GPT-2 file.
+The alphabet is closed. It does not grow. Every UTF-8 string already fits in 0–255. What grows is the body: `d_model`, depth, experts, oscillators, rank. `grow_atom` refuses a vocab change.
 
-The 320-d packet features are **not** in the id stream. They stay on the packet. Putting them into the tick would be a second input channel (`tick_vec`), which this fork does not do. The boundary id is the part of the Atomizer decision the CE head can see.
+## Body
 
-## What was deliberately not done
+Not a transformer. Residual thought `h`, then per block: fractal linear attention, Kuramoto RK4, phase-routed MoE (128 experts, top-2, low-rank Siren). Tied embed and head. Confidence and salience heads. Persistent memory, cognitive modes, and a knowledge-base retriever exist and are constructed together in `fractus/atom_session.py`.
 
-- The x8 run was not resumed, remerged, or rewritten. `START_TOKEN=0` is legal **only** on this new model.
-- Phase-2 shards (`shard_phase2_gpu*.npy`) and `training_corpus.pt` were not reused. Those files are GPT-2 ids. An id `≥ 266` is rejected by the scratch loader.
-- No 1B training run was launched. A CPU smoke (`--scale smoke`, 68,656 params, a few steps) only checked that the graph runs. Its cross-entropy sits far above `ln(266) ≈ 5.58` because the tiny net is randomly initialised and untrained. That number is not a speech result.
-- Old train scripts under `scripts/train_1b_*.py` still mention vocab 50257. They belong to the parent engine. The scratch entry point is `scripts/train_atom_from_scratch.py`.
+1B shape: `d_model=1280`, 16 blocks, 20 heads, 128 experts, top-2, `expert_d_ff=2048`, `siren_rank=64`, `n_levels=2`. Counted without allocating the weights: about **0.99B** total, **119.6M** active per token. The old 1.05B figure included the 50257 head. Do not quote it for this fork.
 
-## Train from zero
+Chinchilla on active params: `20 × 119.6M ≈ 2.4B` Atom ids. Top-4 would roughly double the active expert cost and the data target. 2 of 128 is the parent router, not a new choice. 4B Atom ids train faster than 4B BPE tokens, because the head is 266 instead of 50257. They are less text, because an id is a byte.
 
-Retokenize raw text only (`.txt`, `.jsonl`, `.jsonl.gz`):
+## Train
 
 ```bash
 pip install torch numpy
 python scripts/build_atom_corpus.py --src data/raw --out data/atom_corpus
+python scripts/train_atom_from_scratch.py --scale smoke --steps 40
 python scripts/train_atom_from_scratch.py --scale 1b --corpus data/atom_corpus.i16
 ```
 
-`--scale smoke` is the CPU path check. `--scale 1b` is the parent 1B shape (`d_model=1280`, 16 blocks, 20 heads, 128 experts, top-2, `expert_d_ff=2048`) with `vocab_size=266`. The checkpoint records `tokenizer.version`, `start_token: 0`, and `parent: hf:thefinalboss/fractus-cte`.
+`--scale smoke` is the CPU check. `--scale 1b` is the parent shape with vocab 266. The checkpoint records `start_token: 0` and `parent: hf:thefinalboss/fractus-cte`. Phase-2 shards and `training_corpus.pt` are GPT-2 ids. The loader rejects any id `≥ 266`.
 
-Because the head shrank from 50257 to 266, a fresh 1B is no longer ~1.05B parameters. The tied embed/head drops from ~128M to `266 × 1280 ≈ 0.34M`. The block stack is unchanged. Count parameters from the constructed module. Do not quote the old 1.05B figure for this fork.
-
-Chinchilla on the parent used **active** parameters (~119M/token), not `20 × 1.05B`. Recompute it after the first real init: active params × 20 is the sparse-MoE token target. The old 2.4–3.7B token band was for the GPT-2 head. It is not a target to copy blindly, and it is not a reason to train on the old shards.
+`START_TOKEN=0` is legal only on this new model.
 
 ## What to measure
 
-Teacher-forced CE falling is not speech. The parent run already showed that. Measure the following, in this order.
+Teacher-forced CE falling is not speech. The parent run already showed that: CE around 5–8, unique@40 still about 3.3.
 
-1. **Tokenizer lock, before any GPU spend.** Round-trip on French, English, code, and a string with accents and newlines: `decode(encode(text)) == text`. Every train id must sit in `0..265`. Boundary histogram should not be 100% `max_span` (that means the packer is just cutting at 32 bytes and the linguistic mode is unused). Report bytes per packet and packets per 1,000 characters against a GPT-2 encode of the same sample, so the fertility change is a number.
+1. **Tokenizer lock.** `decode(encode(text)) == text` on French, English, code, accents, newlines. Every train id in `0..265`. Boundary histogram must not be 100% `max_span`.
+2. **Init CE, frozen weights.** Near `ln(266) ≈ 5.58`. Echo fraction near 0. A step-0 CE of tens means the logit scale is blown (the old `N(0,1)` embed did this: echo 1.0, CE ~58).
+3. **Teacher-forced CE.** An optimisation trace. Not the gate.
+4. **Speech gate.** Greedy PREFIX, no ban, no temperature, open prefix. Count unique ids over 40 generated steps, and unique bytes after dropping ids `≥ 256`. Do not declare speech off a falling CE.
+5. **Prefix alignment.** `encode_open(prompt)` must equal the prefix of `encode(prompt + continuation)` up to the prompt bytes. If it does not, generation is off the manifold the model trained on.
+6. **Load balance.** `last_lb_loss` and per-expert hits. Top-2 of 128 with a dead gate is the parent failure mode.
 
-2. **Init CE, step 0, frozen weights.** On a random batch, mean CE should be near `ln(266) ≈ 5.58` nats if the head is uninformed. A step-0 CE of tens means the logit scale is blown up (init, residual, or a shape bug), not that the data is hard. Log CE and load-balance separately. Do not add them into one number and call it CE.
+## What is not done
 
-3. **Teacher-forced CE on the Atom stream.** Useful only as an optimisation trace. It is not the speech gate.
+- No 1B run. No pod was opened.
+- The starter corpus is 1.06M ids. That is about 0.04% of the 2.4B active-param target. A 1B on it will memorize the two files.
+- The speech proof is a memorized 25-id phrase, not free language.
+- `unique40_probe` now generates. A low unique count is still NO-GO.
 
-4. **Speech gate.** Greedy PREFIX, no ban, no temperature. Generate from a short prompt, decode with the Atom tokenizer (drop ids `≥ 256`), and count unique characters over the first 40 generated **bytes** (the parent gate was unique@40 on BPE tokens; on this fork the unit is the byte, so report both unique bytes @40 and unique packets @40). The parent NO-GO was unique@32 in the 12–27 range and not English. Do not declare speech off a falling CE.
+## Small-model checks already run
 
-5. **Boundary fidelity under generation.** The fraction of generated ids that are boundary markers, and whether a boundary id is ever emitted in the middle of a UTF-8 code point. A decode that needs `errors="replace"` on the model's own output is a fail even if CE is low.
-
-6. **Expert load balance.** `last_lb_loss` and per-expert hit counts. Top-2 of 128 with a dead gate is the same failure mode as the parent. The Kuramoto routing fix (`apply_kuramoto_routing_fix`, gate temperature 2.5, omega scale ×4) is a parent-run load fix. It is not applied by the scratch script. Decide explicitly before a long run; do not inherit it by accident.
-
-7. **Parameter and token accounting.** Print `sum(p.numel())` and an active-param estimate (embed + norms + attention + the top-2 experts, not all 128). Quote the token target off that count. Keep a `start_token` in the checkpoint. On this fork it starts at 0 and then only moves forward.
-
-## Layout
-
-| path | role |
+| check | result |
 |---|---|
-| `fractus/continuous_engine.py` | HF CTE stack, unchanged contract |
-| `fractus/atomizer.py` | vendored ATOM byte-span atomizer |
-| `fractus/atom_tokenizer.py` | packet → id stream, vocab 266 |
-| `fractus/tokenizer.py` | parent GPT-2 wrapper, unused by the scratch path |
-| `scripts/build_atom_corpus.py` | raw text → int16 memmap |
-| `scripts/train_atom_from_scratch.py` | fresh init only |
-| `docs/` | parent training notes, historical, not a resume protocol for this fork |
-
-## License
-
-MIT. Engine and notes from Fractus CTE. Atomizer from atom-ai.
+| Init CE / echo | 5.592 / 0.0 |
+| 80-step smoke, no reset | CE 5.56 → ~2.6, thought norm stayed live |
+| Carry across two ticks | moved, and did not return to the previous state |
+| Memorized phrase, open prefix, no ban | `abcdef ` → `Fractus 12345.` |
+| Grow then Siren vs factors | identical |
+| Pod script without `ATOM_POD=1` | exit 2 |
