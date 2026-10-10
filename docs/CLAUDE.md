@@ -123,24 +123,16 @@ The model does not read r. It reads MoE gates. On this fresh smoke (8 experts, t
 
 ## Chunk routing
 
-`_tick_chunk_core_pure` routes the whole chunk with the last position's θ:
+Fixed. `_tick_chunk_core_pure` now passes `phases_in = theta`. Each position is gated by its own phase. Generation already did this (`theta[:, 0:1]`). The old expand of `theta[:, -1]` is gone.
 
-```python
-phases_last = theta[:, -1:, :]
-phases_in = phases_last.expand(-1, C, -1)
-```
+Measured on a smoke body (64-d, 8 experts, top-2, Kuramoto fix on):
 
-Generation (`tick_single`) routes with `theta[:, 0:1]`, the current token. Same lines in the parent. Inherited, not introduced here.
+- Last-theta routing: after 400 steps the leak is real. Changing only the last id moved position-0 logits by **0.028**. Theta spread between pos 0 and pos last was 0.024.
+- Per-token routing: the same probe stays at **0.000** at every step from 0 to 400. Last-position logits still move (the token changed). Earlier positions do not.
+- Throughput on the same CPU smoke, 40 steps after warmup: last-theta **2,257 ids/s**, per-token **2,088 ids/s**. About 7% slower on this tiny body. Not a 1B number.
+- Alive experts stayed 2/8 either way on this short run. The switch removes the leak. It does not by itself wake more experts.
 
-Structural consequences: one routing decision per chunk per block, and a possible causal leak, because position t is gated by a θ computed from h at C−1.
-
-Measured on a fresh smoke, both at default T and at T=2:
-
-- Changing only the last id moves the last position's logits (~0.02–0.03). Positions 0..C−2 stay at 0, or at ~1e-4, float noise.
-- `theta[:, 0]` and `theta[:, -1]` differ by ~1e-7. `_encode_from_hidden` uses the mean of a LayerNorm'd h, which is ~0, so phases barely depend on position until the clock has something to integrate.
-- Alive experts stayed 2/8. The "2 alive" count was this expand, not a T effect.
-
-The leak is in the code. It is inert while θ is flat. It becomes real when phases start depending on position. Do not switch to `phases_in = theta` (per-token, causal, aligned with generation) until a small train shows the leak is nonzero and the gate does not get worse. That switch also changes MoE cost. Measure ids/s if it is made.
+Do not put the expand back. It is a causal leak once phases depend on position, and it disagrees with generation.
 
 ## If you are unsure
 

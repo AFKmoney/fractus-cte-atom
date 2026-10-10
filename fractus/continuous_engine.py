@@ -200,10 +200,12 @@ class CTEBlock(nn.Module):
         theta = self.kuramoto._encode_from_hidden(h_kur)
         theta = self.kuramoto._rk4_integrate(theta)
 
-        # MoE.
+        # MoE. Per-token phases: causal, aligned with tick_single.
+        # The old expand of theta[:, -1] routed the whole chunk by the last
+        # position and leaked future tokens into earlier gates once phases
+        # depended on position (measured after ~400 smoke steps).
         h_moe = self.norm_moe(h)
-        phases_last = theta[:, -1:, :]
-        phases_in = phases_last.expand(-1, C, -1)
+        phases_in = theta
         moe_out, lb_loss = self.moe(h_moe, phases_in)
         h = h + moe_out
 
