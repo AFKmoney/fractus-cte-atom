@@ -51,6 +51,22 @@ The parent body is intact and on the Atom path.
 - `scripts/pod_atom_from_scratch.sh` refuses to run unless `ATOM_POD=1` is set on a machine that already has the GPU. It does not open a pod.
 - `scripts/train_1b_gpu.py` refuses a checkpoint whose vocab is not 266.
 
+## Atomization
+
+ATOM does not build a vocabulary. The Atomizer cuts a raw UTF-8 byte stream into spans on structural boundaries: whitespace, punctuation, newline, a switch between letters and digits, a max length of 32 bytes, or the end of the stream. Each span is a packet: the bytes, the boundary that closed it, and a 320-d feature vector. Two spans with the same letters can still differ, because the features include a rolling context sketch. The packet is an event, not a permanent vocab row.
+
+Fractus cannot eat a packet. It ticks one integer. So this fork turns each packet into ids the existing head can embed and predict:
+
+1. The payload is emitted as raw bytes, ids 0–255. No merge. `é` is the UTF-8 bytes of `é`, not a French token.
+2. After the payload, one boundary id (259–265) records why the span closed.
+3. A training document is wrapped with BOS (257) and EOS (258). A generation prompt is not. `encode_open` leaves the tail unflushed and does not write EOS, so the prompt is a prefix of the longer text the model trained on.
+
+Decode throws away every id ≥ 256 and UTF-8-decodes what remains. Round-trip on the bytes is exact. There is no merge table and no GPT-2 file.
+
+The 320-d features are not ids. They enter through `atom_feat`, a linear map into `d_model`, zero at init, added on the boundary position. A run that does not pass features is unchanged.
+
+CPU smoke, measured on this fork: **1,729 Atom ids/s** on the small body (106,624 params, 2 blocks, width 64, B=1, seq 32, v4 step with backward). That number is not a 1B rate. The ~1,000/s parent figure is BPE tokens on a 5090, not Atom ids.
+
 ## The id stream
 
 | ids | meaning |

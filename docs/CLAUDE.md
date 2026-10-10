@@ -90,7 +90,7 @@ The parent number is tokens. This fork counts Atom ids. Do not mix them.
 - If, and only if, a later benchmark shows ~1,000 Atom ids/s/GPU, then 2.4B ids is ~28 days on 1 GPU and ~7 on 4. Until that benchmark exists, those days are a transposition, not a plan.
 - 1,000 positions/s on ~120M active params is ~0.7 TFLOPS, under 1% of a 5090 FP32 peak. Same fact as "the step is the bottleneck." A half-day run is a peak-FLOP ceiling (6 × 2.4B × 120M ≈ 1.7×10¹⁸ ops). No measurement on this body supports it.
 - Before optimizing a kernel, measure where memory goes (activations per component, state kept for backward, MoE buffers) and how many Atom ids each expert sees per step. Top-2 of 128 at B=4 means tiny matmuls. If the benchmark confirms that, the lever is freeing memory to raise the batch, not a faster kernel.
-- The 1B trainer of reference is `scripts/fast4gpu_boost_v4.py`. `train_atom_from_scratch.py` is a B=1 smoke that resets thought every step.
+- CPU smoke, measured 2026-10-09 on this fork: **1,729 Atom ids/s**. Config: 106,624 params, 2 blocks, `d_model=64`, B=1, seq 32, `v4_forward_losses` with backward, 20 steps after warmup. Last CE 5.05. This is the small body, not the 1B. Do not quote 1,729 as a 1B rate.
 
 ## If you are unsure
 
