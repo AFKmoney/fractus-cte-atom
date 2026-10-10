@@ -134,6 +134,25 @@ Measured on a smoke body (64-d, 8 experts, top-2, Kuramoto fix on):
 
 Do not put the expand back. It is a causal leak once phases depend on position, and it disagrees with generation.
 
+## Expert hits
+
+The `_expert_hits` counter in `tick_chunk_train` is not the real count. It calls `_compute_gates` on `kuramoto_phases[:, 0:1, :]` of block 0 only. One position, one block. `tick_chunk_train_ce` (the teacher-forced path) does not count hits at all. With top-2 and B=1, that counter is structurally about 2.
+
+The real count is `topk_idx` inside the MoE forward, over every position and every block. Measured on a smoke body, per-token routing, all positions:
+
+| setup | θ̄ std (rad) | spacing 2π/E | ratio | alive / block |
+|---|---|---|---|---|
+| E=8, fresh | 0.007–0.017 | 0.785 | 0.01–0.02 | 2/8 |
+| E=8, 200 steps | 0.005–0.023 | 0.785 | 0.01–0.03 | 2/8 |
+| E=128, fresh | 0.004–0.006 | 0.049 | 0.08–0.12 | 2–3/128 |
+| E=128, 200 steps | 0.005–0.012 | 0.049 | 0.10–0.25 | 2–3/128 |
+
+Across both blocks, 4–5 experts alive in total. The counter was not the whole story. The real routing is also narrow.
+
+θ̄ is the only thing the gate reads (`atan2` of the summed sin/cos). Its std across positions is far below the expert spacing. Every token lands on the same two experts. Raising r does not fix this: r is how synchronized the oscillators are, not how far θ̄ moves from token to token. At 128 experts the spacing is 2.8°, and the ratio is still under 1.
+
+The lever is not T. It is the range of θ that `_encode_from_hidden` produces (it uses the mean of a LayerNorm'd h, which starts near 0), or the `kappa / temperature` that sets how wide a gate is. Do not treat "2 alive" from the counter as a measurement. Count `topk_idx` over all positions and blocks.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
