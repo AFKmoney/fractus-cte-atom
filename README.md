@@ -34,6 +34,16 @@ Three properties, and they are the product.
 
 **It opens quickly.** The parent paid about 128M parameters for a 50257-id head before a block ran. This head is 266 ids (`266 × 1280 ≈ 0.34M` tied). No merge table. No Hugging Face tokenizer runtime.
 
+## GPU, measured 2026-10-09
+
+One RTX 5090, 1B shape, chunked attention, `torch.compile`, seq 128, B=2:
+
+- Trainable parameters: **985,074,354** (Siren copies frozen: 879,235,072)
+- TF: **119 Atom ids/s**, mean step 2.155 s, `mem_peak` 23.0 GB
+- B=4: OOM on the per-token `index_select` of the expert factors
+
+The GPU does about 200 ms of real work per step. The wall is about 2 s. The card is idle. The next lever is a capacity dispatch that does not copy weights per token. Do not start the 2.4B-id run at 119 ids/s.
+
 ## Status, 2026-10-09
 
 Fixes in the body, measured:

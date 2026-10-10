@@ -247,22 +247,24 @@ What was tried and was slower:
 
 The GPU does ~200 ms of real work. The wall is 2–7 s. The card is idle. The lever is one kernel that handles all live experts, not a Python loop that launches one per expert. Do not start the 2.4B-id run at 128 ids/s. That is about 7 months on one card.
 
-## Factor path, 2026-10-09
+## Factor path, measured 2026-10-09
 
-The MoE forward now runs on the stacked factors (`U1/V1/U2/V2`), not the per-expert Siren modules. The modules stay as the grow copy, with `requires_grad=False`. Trainable count drops from 1.86B to **0.985B**.
+The MoE forward runs on the stacked factors (`U1/V1/U2/V2`). The Siren modules stay as the grow copy, `requires_grad=False`.
 
-Equivalence at init, after the factors are copied into the modules: max absolute difference **4.3e-6** on a small body. Same math.
+- Trainable: **985,074,354**
+- Frozen (Siren copies): **879,235,072**
+- Equivalence at init: max absolute difference **4.3e-6**
 
-For a resume from a checkpoint that was trained through the Siren modules, call `sync_factors_from_siren()` once before the first step. A fresh run does not need it.
+One 5090, chunked attention, `torch.compile`, seq 128, B=2, 5 steps after warmup:
 
-Rate on one 5090, chunked attention, `torch.compile`, seq 128:
+- Mean step: **2.155 s**
+- TF: **119 Atom ids/s**
+- `mem_peak`: **23.0 GB**
+- Step times: 2.32, 2.75, 3.19, 2.10, 0.41 s
 
-| B | ids/s | note |
-|---|---|---|
-| 2 | 39–113 | variable, around the old Siren path |
-| 4 | — | OOM on `index_select` of the factors |
+B=4 OOMs on the `index_select` of the factors. That path copies weights per token. The next lever is a capacity dispatch `(E, C, D)` that does not copy per token.
 
-The `index_select` copies the selected weights per token. At B=2 that is already the memory wall. The next step is a capacity dispatch `(E, C, D)` that does not copy weights per token. Still no Triton required for that.
+For a resume from a checkpoint trained through the Siren modules, call `sync_factors_from_siren()` once before the first step. A fresh run does not need it.
 
 ## If you are unsure
 
