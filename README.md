@@ -79,11 +79,7 @@ The 320-d features are not ids. They enter through `atom_feat`, a linear map int
 
 CPU smoke, measured 2026-10-09 on this fork with all fixes in (`fast4gpu_atom.py`, B=1, seq 32, 106,754 params, `SS_RATE=0.5`):
 
-- Wall: **1,180 Atom ids/s**
-- Teacher-forced pass: **1,878 ids/s**
-- Scheduled-sampling pass: **1,968 ids/s**
-- `ids_ss / ids_tf = 0.60` (SS ran on about 60% of steps)
-- Init CE **5.592** (target `ln(266) ≈ 5.583`)
+Compare TF ids/s, not wall. The B=1 smoke was wall 1,180 / TF 1,878 with `ids_ss/ids_tf = 0.60`. The B=2 smoke was wall 2,244 / TF 2,298 with SS off. The wall doubled because SS did not run. The real batch effect is TF 1,878 → 2,298, +22%. Keep `SS_RATE` fixed and record the ratio, or wall numbers are not comparable.
 
 These are CPU numbers on the small body. They are not a 1B rate. The ~1,000/s parent figure is BPE tokens on a 5090, not Atom ids.
 

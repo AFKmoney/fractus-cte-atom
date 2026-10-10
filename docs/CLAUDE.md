@@ -211,6 +211,12 @@ BOS reset is per row. A BOS in lane b zeros lane b only (thought, `attn_S`, `att
 
 Limit that remains: when a BOS falls in the middle of a chunk, positions after it still see the end of the previous document through the chunk's attention. Same compromise as transformer packing. Not a true empty-state start, but close.
 
+## Reading a rate
+
+Compare TF ids/s, not wall. The B=1 smoke was wall 1,180 / TF 1,878 / SS 1,968 with `ids_ss/ids_tf = 0.60`. The B=2 smoke was wall 2,244 / TF 2,298 with SS off. The wall doubled because SS almost did not run, not because the batch doubled. The real batch effect is **TF 1,878 → 2,298, +22%**. On CPU the cost follows size, with a little fixed cost per step. On GPU that ratio will move. If TF ids/s nearly doubles each time the batch doubles, fixed cost dominates and memory is the lever.
+
+In every SUMMARY, keep `SS_RATE` fixed and record `ids_ss / ids_tf`. Wall numbers are not comparable across runs otherwise.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
