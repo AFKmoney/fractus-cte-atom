@@ -301,6 +301,24 @@ The GPU still does ~256 ms of real work. The wall is 606 ms. There is more to ta
 
 B=32 still OOMs. The wall is the MoE `index_select`, which copies weights per token. Grouped MoE is the next lever for B=64.
 
+## Grouped MoE, measured 2026-10-09
+
+The MoE forward is now grouped. Tokens are sorted by expert, each live expert runs a dense matmul on its own factors, results scatter back. No per-token weight copy. Equivalence to the `index_select` path: max absolute difference **3e-8** in fp32, gradients flow.
+
+`BLOCK_CKPT=1`, one 5090:
+
+| B | ids/s | mem |
+|---|---|---|
+| 4 | 86 | 11.7 GB |
+| 8 | 143 | 11.9 GB |
+| 16 | 246 | 12.4 GB |
+| 32 | 444 | 13.5 GB |
+| 64 | 762 | 15.8 GB |
+
+B=64 fits. The old path OOMed at B=32. Memory is no longer the wall.
+
+The rate is lower than the `index_select` path at the same batch (B=16 was 885 before). The cause is the Python loop over live experts: 16 blocks × ~25 experts × 4 matmuls is ~1600 Python calls per step. At B=64 the matmuls are real GEMMs, but the launch overhead still dominates. The next lever is `torch.compile` on this path, or a grouped GEMM that launches once.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.

@@ -307,6 +307,53 @@ class PhaseRoutedMoE(nn.Module):
         out = (h1_act_exp * w2_sel).sum(dim=-2) + b2_sel  # (B, L, K, D)
         return out
 
+    def _grouped_expert_forward(
+        self, h: torch.Tensor, topk_idx: torch.Tensor
+    ) -> torch.Tensor:
+        """Grouped sparse forward. No per-token weight copy.
+
+        Flatten the N*K (token, expert) pairs, argsort by expert, then
+        one dense matmul per live expert on its contiguous token slice.
+        Scatter back with the inverse permutation. One sync per call
+        (counts.tolist), not one per expert.
+
+        h        : (B, L, d_model)
+        topk_idx : (B, L, K)
+        Returns  : (B, L, K, d_model)
+        """
+        if self.expert_rank is None:
+            return self._sparse_expert_forward(h, topk_idx)
+        B, L, D = h.shape
+        K = topk_idx.shape[-1]
+        N = B * L
+        h_flat = h.reshape(N, D)
+        # pairs: (N*K,) expert ids, (N*K,) token ids, (N*K,) slot ids
+        exp_ids = topk_idx.reshape(-1)
+        tok_ids = torch.arange(N, device=h.device).unsqueeze(1).expand(N, K).reshape(-1)
+        slot_ids = torch.arange(K, device=h.device).unsqueeze(0).expand(N, K).reshape(-1)
+        order = exp_ids.argsort()
+        exp_s = exp_ids.index_select(0, order)
+        tok_s = tok_ids.index_select(0, order)
+        slot_s = slot_ids.index_select(0, order)
+        counts = torch.bincount(exp_s, minlength=self.n_experts)
+        # One sync. 16 of these per step, not 128 per counter.
+        counts_l = counts.tolist()
+        out = h.new_zeros(N, K, D)
+        cursor = 0
+        for e, c in enumerate(counts_l):
+            if c == 0:
+                continue
+            sl = slice(cursor, cursor + c)
+            he = h_flat.index_select(0, tok_s[sl])
+            hV = torch.matmul(he, self.V1[e])
+            h1 = self.scale1[e].reshape(()) * torch.matmul(hV, self.U1[e].t()) + self.b1[e]
+            h1 = _gelu(h1)
+            hV2 = torch.matmul(h1, self.V2[e])
+            ye = self.scale2[e].reshape(()) * torch.matmul(hV2, self.U2[e].t()) + self.b2[e]
+            out[tok_s[sl], slot_s[sl]] = ye
+            cursor += c
+        return out.reshape(B, L, K, D)
+
     def _dense_expert_forward(self, h: torch.Tensor) -> torch.Tensor:
         """DENSE forward (the original path): compute ALL E experts.
 
@@ -374,10 +421,12 @@ class PhaseRoutedMoE(nn.Module):
             topk_sum > 1e-10, topk_vals / topk_sum, uniform_topk
         )
 
-        # Adaptive: dense when small E (einsum wins on CPU), sparse when large E.
+        # Grouped is the default for large E. It does not copy weights per
+        # token, so memory stays flat in batch, and the matmuls are real
+        # GEMMs on the tokens each expert owns.
         use_sparse = self.n_experts > 2 * self.top_k
         if use_sparse:
-            topk_out = self._sparse_expert_forward(h, topk_idx)  # (B, L, K, d_model)
+            topk_out = self._grouped_expert_forward(h, topk_idx)
         else:
             all_out = self._dense_expert_forward(h)  # (B, L, E, d_model)
             idx_exp = topk_idx.unsqueeze(-1).expand(-1, -1, -1, self.d_model)
