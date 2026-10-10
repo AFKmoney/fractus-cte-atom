@@ -109,17 +109,17 @@ The parent number is tokens. This fork counts Atom ids. Do not mix them.
 
 Train and generate use the same integrator. That part is clean. The block builds `KuramotoLayer(..., n_steps=1, dt=0.1)`. `_rk4_integrate` only loops when `n_steps > 1`, so the model takes one RK4 step. The class default of 4, and the unrolled branches for 2–4, are dead at runtime. They are only hit by the equivalence test.
 
-Measured on a fresh smoke body, one forward, no weight change (`scripts/measure_kuramoto_r.py`):
+Measured on a fresh smoke body, one forward, no weight change (`scripts/measure_kuramoto_r.py`). r tracks total time `T = n_steps × dt`, not the step count, while RK4 still holds:
 
-| n_steps | dt | order r |
+| pair | r | theta MAE |
 |---|---|---|
-| 1 | 0.1 | 0.0085 |
-| 1 | 0.2 | 0.018 |
-| 2 | 0.1 | 0.018 |
-| 4 | 0.1 | 0.038 |
-| 4 | 0.5 | 0.189 |
+| 1×0.2 vs 2×0.1 | 0.022 / 0.022 | 0.01° |
+| 1×0.4 vs 4×0.1 | 0.046 / 0.046 | 0.04° |
+| 1×2.0 vs 4×0.5 | 0.128 / 0.242 | 22° |
 
-Default is the flat one. More steps or a larger dt raise r. That is a candidate lever for the dead-expert / flat-phase problem. It is not a speech result: unique@40 was not measured on this sweep. Do not change the default until a small train shows r moving and the gate not getting worse.
+At T=0.4, one step matches four. At dt=2.0, RK4 is no longer the same trajectory. So a larger T can be one step, until the single-step error shows up.
+
+The model does not read r. It reads MoE gates. On this fresh smoke (8 experts, top-2), alive experts stayed 2/8 and normalized dispatch entropy stayed ~0.51 at every T above. r moved. The gate did not. Do not treat a higher r as more living experts until a small train measures both. Do not change the default `n_steps=1, dt=0.1` until that train exists. Fixing T before the first real run is a setting. Changing it after is retuning a clock the weights were trained on.
 
 ## If you are unsure
 
