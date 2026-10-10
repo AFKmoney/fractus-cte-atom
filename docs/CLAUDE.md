@@ -38,7 +38,7 @@ Do not re-implement these. Read them.
 - `fractus/generate_aligned.py` — speech gate. Greedy PREFIX, no ban, no temperature, open prefix.
 - `fractus/atom_session.py` — one constructor for engine, routing fix, memory, modes, RAG, grow.
 - `scripts/train_atom_from_scratch.py` — CPU smoke and the from-zero entry. B=1, resets thought every step. Not the 1B throughput reference.
-- `scripts/fast4gpu_boost_v4.py` — the 1B trainer of reference. Parent loop, Atom vocab.
+- `scripts/fast4gpu_boost_v4.py` — parent 1B loop. Not Atom-ready: slices a larger head to 266, refuses `.i16`, sets gate temp only.
 - `scripts/pod_atom_from_scratch.sh` — does not open a pod. Refuses unless `ATOM_POD=1` on a box that already has the GPU.
 - `data/atom_corpus.i16` — 1,059,743 Atom ids. A starter. Not the phase-2 stream.
 
@@ -91,6 +91,11 @@ The parent number is tokens. This fork counts Atom ids. Do not mix them.
 - 1,000 positions/s on ~120M active params is ~0.7 TFLOPS, under 1% of a 5090 FP32 peak. Same fact as "the step is the bottleneck." A half-day run is a peak-FLOP ceiling (6 × 2.4B × 120M ≈ 1.7×10¹⁸ ops). No measurement on this body supports it.
 - Before optimizing a kernel, measure where memory goes (activations per component, state kept for backward, MoE buffers) and how many Atom ids each expert sees per step. Top-2 of 128 at B=4 means tiny matmuls. If the benchmark confirms that, the lever is freeing memory to raise the batch, not a faster kernel.
 - CPU smoke, measured 2026-10-09 on this fork: **1,729 Atom ids/s**. Config: 106,624 params, 2 blocks, `d_model=64`, B=1, seq 32, `v4_forward_losses` with backward, 20 steps after warmup. Last CE 5.05. This is the small body, not the 1B. Do not quote 1,729 as a 1B rate.
+- `fast4gpu_boost_v4.py` cannot run that benchmark yet.
+  - Default checkpoint is the parent (`fractus_1b_gpu{N}.pt` or `FRACTUS_1B_STAGE2_MERGED.pt`). It builds vocab 266, copies matching tensors, and slices any row whose first dim is larger. That cuts a 50257 head down to 266. It is not a from-scratch Atom init.
+  - It accepts only `.npy` shards. `data/atom_corpus.i16` is refused.
+  - Kuramoto: `moe.temperature = GATE_TEMP` only. It does not call `apply_kuramoto_routing_fix`, so omega ×4 is missing.
+  - `START_TOKEN` defaults to 0. On this script that is a parent-resume footgun, not the legal fresh-model zero.
 
 ## If you are unsure
 

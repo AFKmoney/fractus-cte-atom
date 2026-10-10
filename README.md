@@ -103,7 +103,7 @@ python scripts/train_atom_from_scratch.py --scale smoke --steps 40
 python scripts/train_atom_from_scratch.py --scale 1b --corpus data/atom_corpus.i16
 ```
 
-`--scale smoke` is the CPU check. `--scale 1b` is the parent shape with vocab 266. The checkpoint records `start_token: 0` and `parent: hf:thefinalboss/fractus-cte`. Phase-2 shards and `training_corpus.pt` are GPT-2 ids. The loader rejects any id `≥ 266`.
+`scripts/fast4gpu_boost_v4.py` is the parent 1B trainer. On this fork it is not Atom-ready: it defaults to a parent checkpoint and slices a larger head down to 266, it refuses `atom_corpus.i16` (`.npy` only), and it sets gate temperature without the omega ×4 half of the Kuramoto fix. A GPU benchmark of Atom cannot run on it until that is fixed. `scripts/train_atom_from_scratch.py` is the from-zero entry, and it is a B=1 smoke.
 
 `START_TOKEN=0` is legal only on this new model.
 
