@@ -319,6 +319,30 @@ B=64 fits. The old path OOMed at B=32. Memory is no longer the wall.
 
 The rate is lower than the `index_select` path at the same batch (B=16 was 885 before). The cause is the Python loop over live experts: 16 blocks × ~25 experts × 4 matmuls is ~1600 Python calls per step. At B=64 the matmuls are real GEMMs, but the launch overhead still dominates. The next lever is `torch.compile` on this path, or a grouped GEMM that launches once.
 
+## Capacity MoE, measured 2026-10-09
+
+The grouped path had 32 `.item()` syncs per step (one `counts.tolist()` per block, doubled by checkpoint). That was 2 s of wall. The capacity path replaces the loop with four `bmm` on the full factors. Fixed shapes, no sync, no per-expert `select` on parameters.
+
+Equivalence to the grouped path, cf=8 (no overflow): max absolute difference **1.5e-8** in fp32. Gradients flow.
+
+`BLOCK_CKPT=1`, one 5090, no compile:
+
+| B | ids/s | mem | step |
+|---|---|---|---|
+| 16 | 1 986 | 13.2 GB | 1.03 s |
+| 32 | 2 358 | 15.2 GB | 1.74 s |
+| 64 | 2 827 | 19.2 GB | 2.90 s |
+
+Same, with `torch.compile(mode="reduce-overhead")`:
+
+| B | ids/s |
+|---|---|
+| 16 | 1 848 |
+| 32 | 2 576 |
+| 64 | 3 095 |
+
+The grouped path was 246 / 444 / 762 at those batches. Capacity is 8× at B=16 and 4× at B=64. Compile helps at large batch, not at small. The overflow rate was not logged in this pass; cf=4 is the default, measure `1 - keep.mean()` on a real run before trusting the numbers at scale.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.

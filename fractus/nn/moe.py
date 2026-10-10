@@ -307,6 +307,42 @@ class PhaseRoutedMoE(nn.Module):
         out = (h1_act_exp * w2_sel).sum(dim=-2) + b2_sel  # (B, L, K, D)
         return out
 
+    def _capacity_expert_forward(
+        self, h: torch.Tensor, topk_idx: torch.Tensor, cf: float = 4.0
+    ) -> torch.Tensor:
+        """Capacity dispatch. Fixed shapes, no sync, no Python loop.
+
+        Each expert owns C slots. Tokens sort into slots by arrival order.
+        Overflow is dropped (keep=0). Four bmm on the full factors, so the
+        backward sees one gradient per factor, not one per expert.
+
+        h        : (B, L, d_model)
+        topk_idx : (B, L, K)
+        Returns  : (B, L, K, d_model)
+        """
+        if self.expert_rank is None:
+            return self._sparse_expert_forward(h, topk_idx)
+        B, L, D = h.shape
+        K = topk_idx.shape[-1]
+        N = B * L
+        E = self.n_experts
+        h_flat = h.reshape(N, D)
+        e = topk_idx.reshape(-1)                                          # (A,)
+        A = e.shape[0]
+        tok = torch.arange(N, device=h.device).repeat_interleave(K)       # (A,)
+        oh = torch.nn.functional.one_hot(e, E).to(h.dtype)
+        pos = (oh.cumsum(0) * oh).sum(1) - 1                              # rank in expert
+        C = max(8, int((cf * A / E + 7) // 8 * 8))
+        keep = (pos < C).unsqueeze(1).to(h.dtype)
+        slot = e * C + pos.clamp(max=C - 1).to(torch.long)
+        X = h.new_zeros(E * C, D).index_put((slot,), h_flat[tok] * keep, accumulate=True)
+        X = X.view(E, C, D)
+        h1 = self.scale1 * torch.bmm(torch.bmm(X, self.V1), self.U1.transpose(1, 2)) + self.b1[:, None]
+        h1 = _gelu(h1)
+        out = self.scale2 * torch.bmm(torch.bmm(h1, self.V2), self.U2.transpose(1, 2)) + self.b2[:, None]
+        Y = out.view(E * C, D)[slot] * keep
+        return Y.view(B, L, K, D)
+
     def _grouped_expert_forward(
         self, h: torch.Tensor, topk_idx: torch.Tensor
     ) -> torch.Tensor:
@@ -421,12 +457,12 @@ class PhaseRoutedMoE(nn.Module):
             topk_sum > 1e-10, topk_vals / topk_sum, uniform_topk
         )
 
-        # Grouped is the default for large E. It does not copy weights per
-        # token, so memory stays flat in batch, and the matmuls are real
-        # GEMMs on the tokens each expert owns.
+        # Capacity is the default for large E. Fixed shapes, no sync, no
+        # per-expert select on parameters. The overflow is the price; the
+        # GPU was idle 89% of the time, so the waste is cheap.
         use_sparse = self.n_experts > 2 * self.top_k
         if use_sparse:
-            topk_out = self._grouped_expert_forward(h, topk_idx)
+            topk_out = self._capacity_expert_forward(h, topk_idx)
         else:
             all_out = self._dense_expert_forward(h)  # (B, L, E, d_model)
             idx_exp = topk_idx.unsqueeze(-1).expand(-1, -1, -1, self.d_model)
