@@ -180,6 +180,19 @@ On the GPU box, in this order. Do not open a pod from here.
 
 Days for 2.4B ids on one card = 2.4e9 / measured ids/s. If SS is much slower than TF on GPU, the first suspect is the `.item()` loop in `tick_chunk_train` (one sync per expert, 128 at the 1B shape). That counter only sees block 0, position 0. It is not the real hit count.
 
+## Speech, measured
+
+A smoke body (64-d, 4 experts, top-2, all fixes in) trained on one repeated phrase with `reset_thought` every step speaks under greedy PREFIX, no ban, no temperature.
+
+- Prompt `abcdef `.
+- Generated: `Fractus 12345. abcdef Fracef FraceuFra`.
+- `unique=19/40`.
+- Target continuation: `Fractus 12345. abcdef Fractus ...`.
+
+Without the reset, the same run memorizes the carried thought instead of the tokens. Accuracy is 0.81 with the training carry and 0.03 after `reset_thought`. Generation resets, so it collapses to one byte. That was the earlier failure. It is not a generation bug.
+
+`fast4gpu_atom.py` resets once at the start, then carries across steps. That is correct for a stream. A memorize test must reset, or the model uses the carry as a shortcut. The anti-repeat term (`chunked_repeat_logprob`) adds the raw echo logit. On a short overfit it drives the total loss large and negative. Train speech probes on CE + LB only.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
