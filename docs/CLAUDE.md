@@ -151,18 +151,17 @@ Across both blocks, 4–5 experts alive in total. The counter was not the whole 
 
 θ̄ is the only thing the gate reads (`atan2` of the summed sin/cos). Its std across positions is far below the expert spacing. Every token lands on the same two experts. Raising r does not fix this: r is how synchronized the oscillators are, not how far θ̄ moves from token to token. At 128 experts the spacing is 2.8°, and the ratio is still under 1.
 
-Fixed. `_encode_from_hidden` no longer uses `mean(dim=-1)`. LayerNorm makes that mean ~0, so every token started at the same point on the circle. It now uses a learned `phase_proj` (`Linear(d_model, 1)`, weight std 1). On a unit-variance h that gives an initial phase spread of order 1 rad.
+Fixed, then recalibrated. The first `phase_proj` used weight std 1. On a LayerNorm'd h that makes the phase std `√d_model` (8 rad at d=64, 36 rad at d=1280). After `remainder(2π)` that is a random hash: θ̄ std saturates at π/√3 ≈ 1.81, the uniform-on-a-circle value. Neighboring tokens land on unrelated experts.
 
-Remeasured, same smoke, per-token routing, all positions:
+The weight std is now `c / √d_model`, so the phase has std ~c rad before the modulo. Default `c=1` (`PHASE_PROJ_C`). Measured on the smoke, d=64:
 
-| setup | θ̄ std | ratio vs 2π/E | alive / block |
-|---|---|---|---|
-| E=8, fresh | 1.8–2.1 | 2.3–2.7 | 8/8 |
-| E=8, 100 steps | 1.6–2.6 | 2.0–3.3 | 8/8 |
-| E=128, fresh | 1.3–1.7 | 25–36 | 45–49/128 |
-| E=128, 100 steps | 0.23–1.9 | 4.7–38 | 20–30/128 |
+| c | phase std before modulo | E=8 alive, fresh → 100 | E=128 alive, fresh → 100 | neigh / spacing (E=128) |
+|---|---|---|---|---|
+| 0.5 | 0.55 | 3 → 3–4 | 15–21 → 5–6 | ~1 |
+| 1.0 | 1.10 | 4–5 → 4 | 28–31 → 9–10 | ~2–3 |
+| 2.0 | 2.19 | 6–7 → 6 | 40–46 → 10–14 | ~2–5 |
 
-The causal leak stays at 0. The MoE is no longer structurally dead. At 128 experts the count drops as the model concentrates; that is learning, not the old flat-phase collapse.
+`c=1` is the default. The phase std stays near c after 100 steps, so the optimizer is not just shrinking `w`. The alive count still falls at E=128: the model concentrates. That is not the old flat-phase collapse (2 alive), and it is not the random hash (45 alive, θ̄ std stuck at 1.81). The causal leak stays at 0.
 
 ## If you are unsure
 

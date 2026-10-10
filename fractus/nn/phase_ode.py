@@ -11,6 +11,7 @@ hidden states at each call. U, Lambda, omega are nn.Parameter (coupling is learn
 """
 
 import math
+import os
 import torch
 import torch.nn as nn
 
@@ -54,11 +55,12 @@ class KuramotoLayer(nn.Module):
         self.coupling_u = nn.Parameter(torch.empty(n_oscillators, rank).uniform_(-1.0, 1.0))
         self.coupling_lambda = nn.Parameter(torch.empty(rank).uniform_(0.01, 0.51))
         # Learned phase from the hidden. The old mean(dim=-1) of a LayerNorm'd
-        # h is ~0, so theta_bar was flat and every token hit the same experts.
-        # std=1 on a unit-variance h gives an initial phase spread of order 1 rad,
-        # comparable to the expert spacing at E=8 and larger than at E=128.
+        # h is ~0, so theta_bar was flat. Weight std is c/sqrt(d_model) so the
+        # projected phase has std ~c rad, not sqrt(d). std=1 would hash h
+        # uniformly around the circle (π/√3 ≈ 1.81 after the modulo).
         self.phase_proj = nn.Linear(d_model, 1, bias=True)
-        nn.init.normal_(self.phase_proj.weight, std=1.0)
+        c = float(os.environ.get("PHASE_PROJ_C", "1.0"))
+        nn.init.normal_(self.phase_proj.weight, std=c / (d_model ** 0.5))
         nn.init.zeros_(self.phase_proj.bias)
 
     def _derivative(self, theta: torch.Tensor) -> torch.Tensor:
