@@ -462,8 +462,8 @@ class ContinuousThoughtEngine(nn.Module):
                 gates = self.blocks[0].moe._compute_gates(
                     self.blocks[0].kuramoto_phases[:, 0:1, :])
                 topk_idx = gates.topk(self.blocks[0].moe.top_k, dim=-1).indices
-                for e in range(self.blocks[0].moe.n_experts):
-                    self._expert_hits[e] += (topk_idx == e).sum().item()
+                counts = torch.bincount(topk_idx.reshape(-1), minlength=self.blocks[0].moe.n_experts)
+                self._expert_hits += counts.detach().cpu()
 
         # Update thought state.
         self.thought_state = h.detach().clone()
@@ -544,8 +544,11 @@ class ContinuousThoughtEngine(nn.Module):
                 self.blocks[0].kuramoto_phases[:, 0:1, :]
             )
             topk_idx = gates.topk(self.blocks[0].moe.top_k, dim=-1).indices
-            for e in range(n_exp):
-                self._expert_hits[e] += (topk_idx == e).sum().item()
+        # Vectorized. The old loop called .item() once per expert, which
+        # forced a CUDA sync each time. 128 syncs at ~12 ms is 1.5 s of wall
+        # for a counter. bincount does it in one kernel, no sync.
+        counts = torch.bincount(topk_idx.reshape(-1), minlength=n_exp)
+        self._expert_hits += counts.detach().cpu()
 
         return logits, total_lb
 

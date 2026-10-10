@@ -39,7 +39,7 @@ Three properties, and they are the product.
 One RTX 5090, 1B shape, chunked attention, `torch.compile`, seq 128, B=2:
 
 - Trainable parameters: **985,074,354** (Siren copies frozen: 879,235,072)
-- TF: **119 Atom ids/s**, mean step 2.155 s, `mem_peak` 23.0 GB
+- TF: **423 Atom ids/s**, mean step 0.606 s (was 119 ids/s before removing the 128 `.item()` syncs in the expert counter)
 - B=4: OOM on the per-token `index_select` of the expert factors
 
 The GPU does about 200 ms of real work per step. The wall is about 2 s. The card is idle. The next lever is a capacity dispatch that does not copy weights per token. Do not start the 2.4B-id run at 119 ids/s.

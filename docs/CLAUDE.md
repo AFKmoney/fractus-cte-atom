@@ -266,6 +266,23 @@ B=4 OOMs on the `index_select` of the factors. That path copies weights per toke
 
 For a resume from a checkpoint trained through the Siren modules, call `sync_factors_from_siren()` once before the first step. A fresh run does not need it.
 
+## The .item() sync, measured 2026-10-09
+
+Profile of one 1B step, B=2, seq 128, chunked attention, no compile:
+
+- CUDA work: **256 ms**
+- Wall: **2.24 s**
+- `aten::item` / `cudaStreamSynchronize`: **4.8 s of CPU**, 75% of the profile
+
+The counter in `tick_chunk_train` looped over 128 experts and called `.sum().item()` each time. Each `.item()` forces a CUDA sync. 128 syncs at ~12 ms is 1.5 s of wall for a counter that does not affect the loss.
+
+Fixed with one `bincount`, no sync. Remeasured:
+
+- Before: **119 ids/s**, mean step 2.155 s
+- After: **423 ids/s**, mean step 0.606 s
+
+The GPU still does ~256 ms of real work. The wall is 606 ms. There is more to take, but the sync was the first lever.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
