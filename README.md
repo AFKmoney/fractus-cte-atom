@@ -103,7 +103,7 @@ python scripts/train_atom_from_scratch.py --scale smoke --steps 40
 python scripts/train_atom_from_scratch.py --scale 1b --corpus data/atom_corpus.i16
 ```
 
-`scripts/fast4gpu_boost_v4.py` is the parent 1B trainer. On this fork it is not Atom-ready: it defaults to a parent checkpoint and slices a larger head down to 266, it refuses `atom_corpus.i16` (`.npy` only), and it sets gate temperature without the omega ×4 half of the Kuramoto fix. A GPU benchmark of Atom cannot run on it until that is fixed. `scripts/train_atom_from_scratch.py` is the from-zero entry, and it is a B=1 smoke.
+`scripts/fast4gpu_atom.py` is the Atom 1B trainer. Fresh engine, full Kuramoto fix, or a strict resume of a 266-row checkpoint. It reads `.i16` and `.npy` and refuses any id outside 0..265. It does not slice a parent head. `scripts/fast4gpu_boost_v4.py` is the parent loop and is not Atom-safe. A CPU smoke of the Atom trainer (106,624 params, B=1, seq 32, 20 steps) ran at **1,378 Atom ids/s** wall. That is not a 1B rate.
 
 `START_TOKEN=0` is legal only on this new model.
 
