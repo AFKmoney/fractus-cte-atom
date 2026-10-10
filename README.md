@@ -73,8 +73,8 @@ Fixes in the body, measured:
 - Speech path works. A small body trained on one repeated phrase with `reset_thought` every step, greedy PREFIX, no ban: prompt `abcdef `, output `Fractus 12345. abcdef Fracef FraceuFra`, `unique=19/40`. Without the reset the model memorizes the carry: **81% accuracy with the training carry, 3% after `reset_thought`**. Generation starts from zero, so it collapsed.
 - The trainer cuts the corpus into B lanes. Row b always reads lane b, so its carry continues its own text. The old contiguous layout was wrong for B > 1. BOS reset is per row: a BOS in one lane does not wipe the others. `start_token_next` is the offset inside each lane; resume with the same `BATCH`.
 - `fast4gpu_atom.py` is the 1B trainer. Fresh start, vocab 266, full Kuramoto fix, refuses a 50257 head, refuses ids outside 0–265, refuses `START_TOKEN=0` on resume.
-- Corpus is 1,059,743 Atom ids. Enough to measure throughput. Not enough to speak. Chinchilla target on ~120M active params is ~2.4B ids.
-- No GPU rate has been measured. The protocol is in `docs/CLAUDE.md`.
+- Starter corpus: `data/atom_corpus.i16`, 1,059,743 Atom ids, two French files. Not the phase-2 stream. The atomized corpus under `atom_corpus/` on HF is partial (110 of 338 source files, 8.3 GB). At 2 bytes per id, that is about 4.1B ids, above the 2.4B Chinchilla target for the current shape. `scripts/convert_atom.py` skips files that already exist.
+- GPU rate is measured. See the evening section above: 5 896 ids/s at B=16, capacity MoE, compiled pure core. That is a benchmark on random ids, not a trained model.
 
 ## What was done
 
