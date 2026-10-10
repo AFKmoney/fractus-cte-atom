@@ -234,6 +234,19 @@ Rates on one 5090, seq 128, `SS_RATE=0`, `PROBE_EVERY=0`:
 
 The GPU does ~200 ms of real work per step at B=2. The wall is ~6.7 s without compile, ~2 s with. The card is idle. The bottleneck is Python, not the kernels. `torch.compile` helps but does not close it. A Triton attention (and a compiled MoE) is the next lever. Do not start the 2.4B-id run at 38 ids/s. That is about two years on one card.
 
+## Speed, after the first GPU day
+
+Best measured rate on one 5090, 1B shape, B=2, seq 128: **~128 Atom ids/s** with chunked attention and `torch.compile`. Without compile, 38.
+
+What was tried and was slower:
+
+- Cumsum attention + compile: 12–24 ids/s. The O(L·D²) state is too big.
+- Batched einsum over the low-rank factors: 9 s/step. PyTorch does not batch N separate small matmuls well.
+- Grouped expert loop in Python: 10–25 s/step. The loop over live experts is the cost.
+- A first Triton low-rank expert kernel: 3 s per MoE call, 33 experts alive. 16 blocks make that the whole step. The kernel still launches once per expert from Python, and the inner D loop is not fused.
+
+The GPU does ~200 ms of real work. The wall is 2–7 s. The card is idle. The lever is one kernel that handles all live experts, not a Python loop that launches one per expert. Do not start the 2.4B-id run at 128 ids/s. That is about 7 months on one card.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
