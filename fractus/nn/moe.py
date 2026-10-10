@@ -127,6 +127,33 @@ class PhaseRoutedMoE(nn.Module):
                     self.siren_2[e].V.copy_(self.V2[e])
                     self.siren_2[e].scale.copy_(self.scale2[e].reshape(()))
                     self.siren_2[e].bias.copy_(self.b2[e])
+            # The stacked factors are the trained body. The Siren modules are
+            # the grow-compatible copy. They must not be parameters, or the
+            # optimizer tracks ~0.87B of dead weights and the count stays at
+            # 1.86B instead of ~0.99B.
+            for m in (self.siren_1, self.siren_2):
+                for p in m.parameters():
+                    p.requires_grad_(False)
+
+    def sync_factors_from_siren(self) -> None:
+        """Copy Siren modules into the stacked factors.
+
+        Use this once, before the first step, when resuming a checkpoint
+        that was trained through the Siren modules. A fresh run does not
+        need it: both sides start from the same init.
+        """
+        if not hasattr(self, "siren_1"):
+            return
+        with torch.no_grad():
+            for e in range(self.n_experts):
+                self.U1[e].copy_(self.siren_1[e].U)
+                self.V1[e].copy_(self.siren_1[e].V)
+                self.scale1[e].copy_(self.siren_1[e].scale.reshape(1, 1))
+                self.b1[e].copy_(self.siren_1[e].bias)
+                self.U2[e].copy_(self.siren_2[e].U)
+                self.V2[e].copy_(self.siren_2[e].V)
+                self.scale2[e].copy_(self.siren_2[e].scale.reshape(1, 1))
+                self.b2[e].copy_(self.siren_2[e].bias)
 
     def _compute_gates(self, phases: torch.Tensor) -> torch.Tensor:
         """Computes the von Mises gates for each token.
@@ -243,27 +270,11 @@ class PhaseRoutedMoE(nn.Module):
         # Gather the K selected experts' weights PER TOKEN.
         flat_idx = topk_idx.reshape(-1)  # (B*L*K,)
 
-        if self.expert_rank is not None and getattr(self, "siren_1", None) is not None:
-            # Selected experts go through LazyStructuredSirenLinear. This is
-            # the body, not a parallel einsum that leaves the class unused.
-            picked = []
-            for k in range(K):
-                idx = topk_idx[:, :, k]  # (B, L)
-                # One module call per expert index that appears. Positions
-                # that did not select it stay zero and are gathered back.
-                acc = h.new_zeros(B, L, D)
-                for e in idx.unique().tolist():
-                    mask = idx == e
-                    if not mask.any():
-                        continue
-                    h1 = _gelu(self.siren_1[e](h))
-                    ye = self.siren_2[e](h1)
-                    acc = acc + ye * mask.unsqueeze(-1).to(ye.dtype)
-                picked.append(acc)
-            return torch.stack(picked, dim=2)
+        # Stacked factors are the trained body. One set of einsums over the
+        # K selected experts. The Siren modules are the grow copy and are not
+        # parameters. For a resume from a module-trained checkpoint, call
+        # sync_factors_from_siren() once before the first step.
         if self.expert_rank is not None:
-            # Sparse LOW-RANK path: gather U/V/scale factors, compute 2 matmuls per expert.
-            # This computes only K experts instead of E — at top-k=2, E=128, that's 64x less work.
             r = self.expert_rank
             g_U1 = self.U1.index_select(0, flat_idx).reshape(B*L, K, self.d_ff, r)
             g_V1 = self.V1.index_select(0, flat_idx).reshape(B*L, K, D, r)
@@ -274,18 +285,13 @@ class PhaseRoutedMoE(nn.Module):
             g_s2 = self.scale2.index_select(0, flat_idx).reshape(B*L, K, 1, 1)
             g_b2 = self.b2.index_select(0, flat_idx).reshape(B*L, K, D)
 
-            # Layer 1: flatten B,L → N=B*L for einsum over K experts.
             N = B * L
-            h_flat = h.reshape(N, D)  # (N, D)
-            # hV1[n,k,r] = Σ_d h_flat[n,d] · g_V1[n,k,d,r]
-            hV1 = torch.einsum('nd,nkdr->nkr', h_flat, g_V1)  # (N, K, r)
-            # h1[n,k,f] = scale1 · Σ_r hV1[r] · U1[f,r] + b1
-            h1 = g_s1.squeeze(-1) * torch.einsum('nkr,nkfr->nkf', hV1, g_U1) + g_b1  # (N, K, F)
+            h_flat = h.reshape(N, D)
+            hV1 = torch.einsum('nd,nkdr->nkr', h_flat, g_V1)
+            h1 = g_s1.squeeze(-1) * torch.einsum('nkr,nkfr->nkf', hV1, g_U1) + g_b1
             h1_act = _gelu(h1)
-
-            # Layer 2: out[n,k,d] = scale2 · Σ_r (h1_act @ V2)[r] · U2[d,r] + b2
-            hV2 = torch.einsum('nkf,nkfr->nkr', h1_act, g_V2)  # (N, K, r)
-            out = g_s2.squeeze(-1) * torch.einsum('nkr,nkdr->nkd', hV2, g_U2) + g_b2  # (N, K, D)
+            hV2 = torch.einsum('nkf,nkfr->nkr', h1_act, g_V2)
+            out = g_s2.squeeze(-1) * torch.einsum('nkr,nkdr->nkd', hV2, g_U2) + g_b2
             return out.reshape(B, L, K, D)
 
         # Dense sparse path (original).

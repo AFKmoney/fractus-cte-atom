@@ -247,6 +247,23 @@ What was tried and was slower:
 
 The GPU does ~200 ms of real work. The wall is 2–7 s. The card is idle. The lever is one kernel that handles all live experts, not a Python loop that launches one per expert. Do not start the 2.4B-id run at 128 ids/s. That is about 7 months on one card.
 
+## Factor path, 2026-10-09
+
+The MoE forward now runs on the stacked factors (`U1/V1/U2/V2`), not the per-expert Siren modules. The modules stay as the grow copy, with `requires_grad=False`. Trainable count drops from 1.86B to **0.985B**.
+
+Equivalence at init, after the factors are copied into the modules: max absolute difference **4.3e-6** on a small body. Same math.
+
+For a resume from a checkpoint that was trained through the Siren modules, call `sync_factors_from_siren()` once before the first step. A fresh run does not need it.
+
+Rate on one 5090, chunked attention, `torch.compile`, seq 128:
+
+| B | ids/s | note |
+|---|---|---|
+| 2 | 39–113 | variable, around the old Siren path |
+| 4 | — | OOM on `index_select` of the factors |
+
+The `index_select` copies the selected weights per token. At B=2 that is already the memory wall. The next step is a capacity dispatch `(E, C, D)` that does not copy weights per token. Still no Triton required for that.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
