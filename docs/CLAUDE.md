@@ -105,6 +105,22 @@ The parent number is tokens. This fork counts Atom ids. Do not mix them.
 - An Atom id is a byte or a boundary. The same text is about 3–4× more positions than BPE. The 266 head is cheaper. The extra positions have to be paid for by a faster step.
 - First things to time on one GPU, before any kernel rewrite: the SS pass (it doubles the work when `SS_RATE=1`), the per-step `.item()` expert-hit loop in `tick_chunk_train` (one sync per expert), `torch.compile`, and the memory that capped the parent at B=4. The number that matters is Atom ids/s from `fast4gpu_atom.py` on one 5090.
 
+## Kuramoto step count
+
+Train and generate use the same integrator. That part is clean. The block builds `KuramotoLayer(..., n_steps=1, dt=0.1)`. `_rk4_integrate` only loops when `n_steps > 1`, so the model takes one RK4 step. The class default of 4, and the unrolled branches for 2–4, are dead at runtime. They are only hit by the equivalence test.
+
+Measured on a fresh smoke body, one forward, no weight change (`scripts/measure_kuramoto_r.py`):
+
+| n_steps | dt | order r |
+|---|---|---|
+| 1 | 0.1 | 0.0085 |
+| 1 | 0.2 | 0.018 |
+| 2 | 0.1 | 0.018 |
+| 4 | 0.1 | 0.038 |
+| 4 | 0.5 | 0.189 |
+
+Default is the flat one. More steps or a larger dt raise r. That is a candidate lever for the dead-expert / flat-phase problem. It is not a speech result: unique@40 was not measured on this sweep. Do not change the default until a small train shows r moving and the gate not getting worse.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
