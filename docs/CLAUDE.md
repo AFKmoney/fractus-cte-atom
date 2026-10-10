@@ -193,6 +193,14 @@ Without the reset, the same run memorizes the carried thought instead of the tok
 
 `fast4gpu_atom.py` resets once at the start, then carries across steps. That is correct for a stream. A memorize test must reset, or the model uses the carry as a shortcut. The anti-repeat term (`chunked_repeat_logprob`) adds the raw echo logit. On a short overfit it drives the total loss large and negative. Train speech probes on CE + LB only.
 
+## Carry vs reset
+
+Measured on a memorized phrase: **81% accuracy with the training carry, 3% after `reset_thought`**. The model was reading the carried state, not the text. Generation starts from zero, so it collapsed.
+
+`fast4gpu_atom.py` now calls `reset_thought` when a chunk contains BOS (id 257). Continuity stays inside a document. An empty thought at a document boundary is a regime the model sees in training, which is the regime generation uses.
+
+Track one more number on a real run: accuracy with the carry against accuracy after reset. If the gap grows, the model is falling back into the carry shortcut. The first-loop drift on the speech probe (`Fractus 12345. abcdef ` correct, then `Fracef FraceuFra`) is the same shape at small scale.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
