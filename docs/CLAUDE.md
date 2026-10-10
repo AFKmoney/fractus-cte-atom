@@ -163,6 +163,23 @@ The weight std is now `c / √d_model`, so the phase has std ~c rad before the m
 
 `c=1` is the default. The phase std stays near c after 100 steps, so the optimizer is not just shrinking `w`. The alive count still falls at E=128: the model concentrates. That is not the old flat-phase collapse (2 alive), and it is not the random hash (45 alive, θ̄ std stuck at 1.81). The causal leak stays at 0.
 
+## GPU benchmark protocol
+
+The CPU smoke (2026-10-09, all fixes in) was **1,180 Atom ids/s wall**, TF **1,878**, SS **1,968**, B=1, seq 32, 106,754 params. `SS_RATE=0.5`. `ids_ss / ids_tf = 768/1280 = 0.60`. If SS ran every step, the wall could not exceed `1 / (1/1878 + 1/1968) ≈ 960` ids/s. The 1,180 matches SS on about 60% of steps. Always report the ratio. A wall number without it is ambiguous.
+
+On the GPU box, in this order. Do not open a pod from here.
+
+1. Guards first. `pytest` and the leak probe on the card. Position 0 must stay at 0 when only the last id changes.
+2. Fix T before timing. Kuramoto cost depends on `n_steps`. If the target is one step at a larger dt, benchmark that, not the default `n_steps=1, dt=0.1`.
+3. A small matrix on the 1B shape, from zero, about 100 steps each. The 1.06M corpus is enough to measure rate. Vary:
+   - `BATCH` 4, 8, 16, until OOM
+   - `BLOCK_CKPT` 0/1
+   - `SS_RATE` 0 and 1, to isolate the SS cost
+   - `COMPILE` 0/1
+4. For each run record TF ids/s, SS ids/s, `ids_ss/ids_tf`, `mem_peak`, and probe share. Set `PROBE_EVERY=0` for a pure benchmark.
+
+Days for 2.4B ids on one card = 2.4e9 / measured ids/s. If SS is much slower than TF on GPU, the first suspect is the `.item()` loop in `tick_chunk_train` (one sync per expert, 128 at the 1B shape). That counter only sees block 0, position 0. It is not the real hit count.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
