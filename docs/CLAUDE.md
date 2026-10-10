@@ -91,6 +91,19 @@ The parent number is tokens. This fork counts Atom ids. Do not mix them.
 - 1,000 positions/s on ~120M active params is ~0.7 TFLOPS, under 1% of a 5090 FP32 peak. Same fact as "the step is the bottleneck." A half-day run is a peak-FLOP ceiling (6 × 2.4B × 120M ≈ 1.7×10¹⁸ ops). No measurement on this body supports it.
 - Before optimizing a kernel, measure where memory goes (activations per component, state kept for backward, MoE buffers) and how many Atom ids each expert sees per step. Top-2 of 128 at B=4 means tiny matmuls. If the benchmark confirms that, the lever is freeing memory to raise the batch, not a faster kernel.
 - CPU smoke of `fast4gpu_atom.py`, 2026-10-09: scale smoke, 106,624 params, B=1, seq 32, 20 steps, corpus `atom_corpus.i16`. Wall **1,378 Atom ids/s**, TF **1,903 ids/s**, SS **2,090 ids/s**. Device CPU. Not a 1B rate. Guards passed: GPT-2 ids refused, 50257 head refused and not sliced, resume does not re-apply omega ×4, `START_TOKEN=0` refused on resume.
+- Time on one GPU is `ids to see / ids per second`. Nothing else. For the 1B shape that is ~2.4B Atom ids. These rows are arithmetic, not measurements:
+
+  | ids/s | days on 1 GPU |
+  |---|---|
+  | 1,000 | ~28 |
+  | 5,000 | ~6 |
+  | 15,000 | ~2 |
+  | 30,000 | ~1 |
+
+  15,000 ids/s on ~120M active params is ~10 TFLOPS (6 FLOPs × params × ids/s). A small fraction of a 5090 peak, so not absurd for the card. It is still unmeasured on this body. Do not pick a row and call it the plan.
+- Two levers, both unmeasured on a 5090: step speed, and model size. A body with 4× fewer active params needs ~4× fewer ids (Chinchilla on active params) and each step is cheaper. Wall time can fall like the square of the size. That is a reason to prove speech on a small body before paying for the 1B. It is not a measured speedup.
+- An Atom id is a byte or a boundary. The same text is about 3–4× more positions than BPE. The 266 head is cheaper. The extra positions have to be paid for by a faster step.
+- First things to time on one GPU, before any kernel rewrite: the SS pass (it doubles the work when `SS_RATE=1`), the per-step `.item()` expert-hit loop in `tick_chunk_train` (one sync per expert), `torch.compile`, and the memory that capped the parent at B=4. The number that matters is Atom ids/s from `fast4gpu_atom.py` on one 5090.
 
 ## If you are unsure
 
