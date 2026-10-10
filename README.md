@@ -34,7 +34,27 @@ Three properties, and they are the product.
 
 **It opens quickly.** The parent paid about 128M parameters for a 50257-id head before a block ran. This head is 266 ids (`266 × 1280 ≈ 0.34M` tied). No merge table. No Hugging Face tokenizer runtime.
 
-## GPU, measured 2026-10-09
+## GPU, measured 2026-10-09 (evening)
+
+One RTX 5090, 1B shape, chunked attention, seq 128. Capacity MoE (fixed shapes, four `bmm` on the full factors, no per-token weight copy, no Python expert loop). Inductor on `_tick_chunk_core_pure` of each block, not on the engine. `BLOCK_CKPT=1`.
+
+| B | ids/s | mem |
+|---|---|---|
+| 8 | 3 153 | 17.7 GB |
+| 12 | 4 400 | 21.0 GB |
+| **16** | **5 896** | 24.1 GB |
+| 20 | 5 450 | 27.4 GB |
+| 24 | 4 343 | 30.6 GB |
+| 32 | OOM | — |
+| 64 | OOM | — |
+
+The earlier number in this file (423 ids/s at B=2, OOM at B=4) was the `index_select` path before capacity dispatch, and before the compile fix. That compile compiled the engine then called `payload()`, which returned `eng._orig_mod`. The compiled graph was never used. The fix compiles the pure core of each block. That path has fixed shapes, so Inductor fuses gelu, bias, scales, Kuramoto and LayerNorm.
+
+Equivalence of the capacity path to the grouped path, cf=8 (no overflow): max absolute difference **1.5×10⁻⁸** in fp32. Gradients flow.
+
+At 5 896 ids/s, 2.4B ids is about 4.7 days on one 5090, or about 1.2 days on 4. That is a calendar, not a speech claim. The speech proof is still a memorized 25-id phrase.
+
+## GPU, measured 2026-10-09 (afternoon)
 
 One RTX 5090, 1B shape, chunked attention, `torch.compile`, seq 128, B=2:
 
@@ -146,10 +166,12 @@ Teacher-forced CE falling is not speech. The parent run already showed that: CE 
 
 ## What is not done
 
-- No 1B run. No pod was opened.
+- No 1B training run on the full corpus. The rate above is a benchmark on random ids, not a trained model.
 - The starter corpus is 1.06M ids. That is about 0.04% of the 2.4B active-param target. A 1B on it will memorize the two files.
-- The speech proof is a memorized 25-id phrase, not free language.
+- The speech proof is a memorized 25-id phrase, not free language. Teacher-forced CE falling is not speech.
 - `unique40_probe` now generates. A low unique count is still NO-GO.
+- Overflow rate at cf=4 was not logged on the capacity path. Measure `1 - keep.mean()` before trusting the rate at scale.
+- The atomized corpus is partial: 110 of 338 source files, 8.3 GB, on HF under `atom_corpus/`. `scripts/convert_atom.py` skips files that already exist.
 
 ## Small-model checks already run
 
