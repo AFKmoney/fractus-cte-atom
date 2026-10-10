@@ -253,12 +253,19 @@ def main() -> None:
     eng = eng.to(device)
     eng.reset_thought(B)
     if use_compile:
+        # Compile the pure core of each block, not the engine. The engine
+        # compile was bypassed: every pass called payload(), which returned
+        # eng._orig_mod. The pure core has fixed shapes, so Inductor can fuse
+        # gelu, bias, scales, Kuramoto and LayerNorm. Works with BLOCK_CKPT
+        # because the checkpoint calls this same method.
         try:
-            eng = torch.compile(eng)
-            log("torch.compile ON")
+            for blk in eng.blocks:
+                blk._tick_chunk_core_pure = torch.compile(
+                    blk._tick_chunk_core_pure, dynamic=False)
+            log("torch.compile ON (_tick_chunk_core_pure per block)")
         except Exception as exc:  # pragma: no cover
             log(f"compile skip: {exc}")
-    payload = lambda: (eng._orig_mod if hasattr(eng, "_orig_mod") else eng)  # noqa: E731
+    payload = lambda: eng  # noqa: E731
 
     if opt_name == "adamw":
         opt = torch.optim.AdamW(eng.parameters(), lr=lr, weight_decay=0.01)

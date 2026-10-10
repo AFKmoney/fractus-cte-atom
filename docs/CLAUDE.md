@@ -319,6 +319,28 @@ B=64 fits. The old path OOMed at B=32. Memory is no longer the wall.
 
 The rate is lower than the `index_select` path at the same batch (B=16 was 885 before). The cause is the Python loop over live experts: 16 blocks × ~25 experts × 4 matmuls is ~1600 Python calls per step. At B=64 the matmuls are real GEMMs, but the launch overhead still dominates. The next lever is `torch.compile` on this path, or a grouped GEMM that launches once.
 
+## Compiled pure core, measured 2026-10-09
+
+`fast4gpu_atom.py` compiled the engine then called `payload()`, which returned `eng._orig_mod`. The compiled graph was never used. The fix compiles `_tick_chunk_core_pure` of each block directly. That path has fixed shapes, so Inductor fuses gelu, bias, scales, Kuramoto and LayerNorm. It works with `BLOCK_CKPT` because the checkpoint calls the same method.
+
+`BLOCK_CKPT=1`, one 5090, compiled pure core:
+
+| B | ids/s | mem |
+|---|---|---|
+| 8 | 3 153 | 17.7 GB |
+| 12 | 4 400 | 21.0 GB |
+| 16 | **5 896** | 24.1 GB |
+| 20 | 5 450 | 27.4 GB |
+| 24 | 4 343 | 30.6 GB |
+| 32 | OOM | — |
+| 64 | OOM | — |
+
+Uncompiled B=16 was 1 986. Compiled pure core is 5 896. The peak is B=16; past that, memory pressure drops the rate.
+
+CUDA graph (no checkpoint, no compile) also works: B=16 gives 4 394 ids/s at 11.6 GB. The graph cannot capture the checkpoint path (`CUDAGeneratorImpl::current_seed`). The compiled pure core is faster and keeps the checkpoint, so it is the path.
+
+At 5 896 ids/s, 2.4B ids is about 4.7 days on one 5090, or about 1.2 days on 4.
+
 ## Capacity MoE, measured 2026-10-09
 
 The grouped path had 32 `.item()` syncs per step (one `counts.tolist()` per block, doubled by checkpoint). That was 2 s of wall. The capacity path replaces the loop with four `bmm` on the full factors. Fixed shapes, no sync, no per-expert `select` on parameters.
