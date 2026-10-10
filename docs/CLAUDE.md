@@ -201,6 +201,16 @@ Measured on a memorized phrase: **81% accuracy with the training carry, 3% after
 
 Track one more number on a real run: accuracy with the carry against accuracy after reset. If the gap grows, the model is falling back into the carry shortcut. The first-loop drift on the speech probe (`Fractus 12345. abcdef ` correct, then `Fracef FraceuFra`) is the same shape at small scale.
 
+## Lanes
+
+The batch is B lanes, not one contiguous block viewed as `(B, SEQ)`. Row b always reads lane b, so the carry of row b at step n+1 continues exactly the text row b saw at step n. The old layout handed row b a carry from text `(B-1)×SEQ` ids earlier whenever B > 1. B=1 was fine. Verified at B=2 on the CPU smoke: 2,244 ids/s wall, TF 2,298, CE 5.59.
+
+BOS reset is per row. A BOS in lane b zeros lane b only (thought, `attn_S`, `attn_z`, phases). It does not wipe rows that are mid-document.
+
+`start_token_next` is the offset inside each lane. Resume with the same `BATCH`. The manifest says so.
+
+Limit that remains: when a BOS falls in the middle of a chunk, positions after it still see the end of the previous document through the chunk's attention. Same compromise as transformer packing. Not a true empty-state start, but close.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.

@@ -229,18 +229,26 @@ def main() -> None:
     shard = corpus[lo:hi]
     shard_len = hi - lo
     step_ids = B * SEQ
-    if shard_len < step_ids + 2:
-        raise SystemExit(f"corpus slice {lo}..{hi} shorter than one step ({step_ids + 1} ids)")
+    # B lanes. Row b always reads lane b, so the carry of row b at step n+1
+    # continues exactly the text row b saw at step n. The old layout
+    # (one contiguous block viewed as (B, SEQ)) handed row b a carry from text
+    # (B-1)*SEQ ids earlier, not its own predecessor, whenever B > 1.
+    lane_len = shard_len // B
+    if lane_len < SEQ + 2:
+        raise SystemExit(f"corpus slice {lo}..{hi} too short for {B} lanes of {SEQ + 1} ids")
+    lane_starts = np.arange(B, dtype=np.int64) * lane_len
 
+    # START_TOKEN / start_token_next is the offset inside each lane.
     start = resolve_start(ckpt_in)
-    start = (start // step_ids) * step_ids
+    start = (start // SEQ) * SEQ
 
     eng, cfg, birth = build_engine(scale, ckpt_in, log)
     n_params = sum(p.numel() for p in eng.parameters())
     log(f"ATOM scale={scale} params={n_params:,} vocab={VOCAB_SIZE} B={B} SEQ={SEQ} "
         f"attn={os.environ['FRACTUS_ATTN_IMPL']} block_ckpt={block_ckpt} ss_rate={ss_rate} "
         f"opt={opt_name} lr={lr} fresh={birth['fresh']}")
-    log(f"corpus {corpus_path} total={n_total:,} slice={lo:,}..{hi:,} start={start:,}")
+    log(f"corpus {corpus_path} total={n_total:,} slice={lo:,}..{hi:,} "
+        f"lanes={B}x{lane_len:,} lane_offset={start:,}")
 
     eng = eng.to(device)
     eng.reset_thought(B)
@@ -257,13 +265,25 @@ def main() -> None:
     else:
         opt = torch.optim.SGD(eng.parameters(), lr=lr, momentum=0.9)
 
-    def fetch(pos: int, count: int) -> torch.Tensor:
-        view = np.asarray(shard[pos:pos + count], dtype=np.int64)
-        return torch.from_numpy(view).to(device, non_blocking=True)
+    def fetch(off: int) -> torch.Tensor:
+        """(B, SEQ+1): row b = lane b, ids [off, off+SEQ]."""
+        rows = [np.asarray(shard[s + off:s + off + SEQ + 1], dtype=np.int64) for s in lane_starts]
+        return torch.from_numpy(np.stack(rows)).to(device, non_blocking=True)
+
+    def reset_rows(mask: torch.Tensor) -> None:
+        """Zero the carry of the rows in mask only. Other rows keep their document."""
+        e = payload()
+        keep = (~mask).to(e.thought_state.dtype)
+        e.thought_state = e.thought_state * keep.view(-1, 1, 1)
+        for blk in e.blocks:
+            blk.attn_S = blk.attn_S * keep.view(-1, 1, 1).to(blk.attn_S.dtype)
+            blk.attn_z = blk.attn_z * keep.view(-1, 1).to(blk.attn_z.dtype)
+            blk.kuramoto_phases = blk.kuramoto_phases * keep.view(-1, 1, 1).to(blk.kuramoto_phases.dtype)
 
     ckpt_out.parent.mkdir(parents=True, exist_ok=True)
 
-    def save(ids_done: int) -> None:
+    def save(off: int) -> None:
+        ids_done = off * B
         tmp = ckpt_out.with_suffix(ckpt_out.suffix + ".tmp")
         torch.save({
             "model_state": payload().state_dict(),
@@ -271,7 +291,8 @@ def main() -> None:
                 **cfg, "vocab_size": VOCAB_SIZE, "atom": True, "scale": scale,
                 "gpu": gpu, "n_gpu": n_gpu, "corpus": str(corpus_path),
                 "corpus_slice": [lo, hi], "ids_processed": ids_done,
-                "start_token_next": ids_done, "batch": B, "seq": SEQ, "lr": lr, "opt": opt_name,
+                "layout": "lanes", "lane_len": lane_len,
+                "start_token_next": off, "batch": B, "seq": SEQ, "lr": lr, "opt": opt_name,
                 "gate_temp": float(os.environ.get("GATE_TEMP", "2.5")),
                 "kuramoto_fix": birth["kuramoto_fix"], "parent": birth["parent"],
                 "fresh_start_token": 0 if birth["fresh"] else None,
@@ -283,11 +304,14 @@ def main() -> None:
         mtmp.write_text(json.dumps({
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "trainer": "fast4gpu_atom", "gpu": gpu, "n_gpu": n_gpu, "scale": scale,
-            "vocab_size": VOCAB_SIZE, "ids_processed": ids_done, "start_token_next": ids_done,
+            "vocab_size": VOCAB_SIZE, "ids_processed": ids_done,
+            "layout": "lanes", "batch": B, "lane_len": lane_len,
+            "start_token_next": off,
+            "note": "start_token_next is the offset inside each lane; resume with the same BATCH",
             "corpus": str(corpus_path), "corpus_slice": [lo, hi], "ckpt": ckpt_out.name,
         }, indent=1))
         os.replace(mtmp, manifest_out)
-        log(f"saved -> {ckpt_out} @ {ids_done:,} ids")
+        log(f"saved -> {ckpt_out} @ lane offset {off:,} ({ids_done:,} ids)")
 
     def probe(ids_done: int) -> None:
         snap = snapshot_carry(payload())
@@ -303,22 +327,25 @@ def main() -> None:
     t_tf = t_ss = t_probe = 0.0
     ids_tf = ids_ss = 0
     n = 0
-    pos = start
+    off = start
     t_wall = time.time()
-    last_pos = shard_len - step_ids - 1
+    last_off = lane_len - SEQ - 1
 
-    while pos <= last_pos:
-        block = fetch(pos, step_ids + 1)
-        chunk = block[:step_ids].view(B, SEQ)
-        target = block[1:].view(B, SEQ)
-        pos += step_ids
+    while off <= last_off:
+        block = fetch(off)
+        chunk = block[:, :SEQ]
+        target = block[:, 1:]
+        off += SEQ
         # Reset at each BOS so the model sees an empty thought at document
         # boundaries. Continuity stays inside a document. Without this, a long
         # run almost never sees an empty state, and generation (which starts
         # from zero) is a regime the model never trained on. Measured: 81%
         # accuracy with the training carry, 3% after reset, on a memorized phrase.
-        if (chunk == 257).any():
-            payload().reset_thought(B)
+        # Per row: a BOS in lane b resets lane b only, not the other documents.
+        bos_rows = (chunk == 257).any(dim=1)
+        if bool(bos_rows.any()):
+            reset_rows(bos_rows)
+        pos = off * B
         ss_prob = ss_prob_at(pos, ss_p0, ss_p1, ss_ramp)
         carry = snapshot_carry(payload())
 
@@ -374,12 +401,12 @@ def main() -> None:
         if probe_every > 0 and n % probe_every == 0:
             t0 = time.time(); probe(pos); t_probe += time.time() - t0
         if save_every > 0 and n % save_every == (gpu * 500) % save_every:
-            save(pos)
+            save(off)
         if max_steps and n >= max_steps:
             break
 
     wall = max(time.time() - t_wall, 1e-9)
-    save(pos)
+    save(off)
     summary = {
         "steps": n, "ids_tf": ids_tf, "ids_ss": ids_ss, "wall_s": round(wall, 2),
         "data_ids_per_s_wall": round(ids_tf / wall, 1),
