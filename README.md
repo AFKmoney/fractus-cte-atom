@@ -34,6 +34,17 @@ Three properties, and they are the product.
 
 **It opens quickly.** The parent paid about 128M parameters for a 50257-id head before a block ran. This head is 266 ids (`266 × 1280 ≈ 0.34M` tied). No merge table. No Hugging Face tokenizer runtime.
 
+## Status, 2026-10-09
+
+Fixes in the body, measured:
+
+- Per-token MoE routing. The chunk is gated by each position's own θ, not the last position's. Causal leak on position 0 is **0** after the switch. It was 0.028 after 400 steps with the old expand.
+- Learned phase encode. `_encode_from_hidden` uses `phase_proj` (`Linear(d_model, 1)`, weight std `c/√d_model`, default `c=1`). The old mean of a LayerNorm'd h was ~0, so every token hit the same experts. At `c=1`, phase std before the modulo is ~1.1 rad. Alive experts: 4–5/8 and 28–31/128 fresh, settling to 4/8 and 9–10/128 after 100 steps. Not the old collapse (2 alive), not a random hash.
+- Speech path works. A small body trained on one repeated phrase with `reset_thought` every step, greedy PREFIX, no ban: prompt `abcdef `, output `Fractus 12345. abcdef Fracef FraceuFra`, `unique=19/40`. Without the reset the model memorizes the carry and collapses on generation.
+- `fast4gpu_atom.py` is the 1B trainer. Fresh start, vocab 266, full Kuramoto fix, refuses a 50257 head, refuses ids outside 0–265, refuses `START_TOKEN=0` on resume.
+- Corpus is 1,059,743 Atom ids. Enough to measure throughput. Not enough to speak. Chinchilla target on ~120M active params is ~2.4B ids.
+- No GPU rate has been measured. The protocol is in `docs/CLAUDE.md`.
+
 ## What was done
 
 The parent body is intact and on the Atom path.
@@ -46,7 +57,7 @@ The parent body is intact and on the Atom path.
 - Packet features (320-d) enter through `atom_feat`, zero-init, placed on the boundary id. A run that does not pass features is unchanged.
 - Embedding init is `N(0, 0.02)`. Step-0 next-token CE measured **5.592**, echo fraction **0.0**. Target is `ln(266) ≈ 5.583`.
 - Speech path: greedy PREFIX does not ban the previous id. A prompt is an open prefix (`encode_open`): no EOS, no closing boundary on the tail. A closed encode made the model think the text was finished.
-- A memorized short phrase spoke. Prompt `abcdef `, output `Fractus 12345.`. Teacher-forced accuracy on that phrase was 1. This proves the path can emit a continuation it learned. It is not a 1B speech claim.
+- A memorized short phrase spoke. Prompt `abcdef `, output `Fractus 12345. abcdef Fracef FraceuFra`, `unique=19/40`. Teacher-forced accuracy on that phrase was 1 with `reset_thought` every step. This proves the path can emit a continuation it learned. It is not a 1B speech claim.
 - Starter corpus: `data/atom_corpus.i16`, 1,059,743 Atom ids, two French files. Not the phase-2 3.44B stream.
 - `scripts/pod_atom_from_scratch.sh` refuses to run unless `ATOM_POD=1` is set on a machine that already has the GPU. It does not open a pod.
 - `scripts/train_1b_gpu.py` refuses a checkpoint whose vocab is not 266.
@@ -65,7 +76,15 @@ Decode throws away every id ≥ 256 and UTF-8-decodes what remains. Round-trip o
 
 The 320-d features are not ids. They enter through `atom_feat`, a linear map into `d_model`, zero at init, added on the boundary position. A run that does not pass features is unchanged.
 
-CPU smoke, measured on this fork: **1,729 Atom ids/s** on the small body (106,624 params, 2 blocks, width 64, B=1, seq 32, v4 step with backward). That number is not a 1B rate. The ~1,000/s parent figure is BPE tokens on a 5090, not Atom ids.
+CPU smoke, measured 2026-10-09 on this fork with all fixes in (`fast4gpu_atom.py`, B=1, seq 32, 106,754 params, `SS_RATE=0.5`):
+
+- Wall: **1,180 Atom ids/s**
+- Teacher-forced pass: **1,878 ids/s**
+- Scheduled-sampling pass: **1,968 ids/s**
+- `ids_ss / ids_tf = 0.60` (SS ran on about 60% of steps)
+- Init CE **5.592** (target `ln(266) ≈ 5.583`)
+
+These are CPU numbers on the small body. They are not a 1B rate. The ~1,000/s parent figure is BPE tokens on a 5090, not Atom ids.
 
 ## The id stream
 
