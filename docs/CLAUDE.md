@@ -37,7 +37,8 @@ Do not re-implement these. Read them.
 - `fractus/train/v4_step.py` — the train step: chunked CE, load-balance, anti-repeat, scheduled sampling.
 - `fractus/generate_aligned.py` — speech gate. Greedy PREFIX, no ban, no temperature, open prefix.
 - `fractus/atom_session.py` — one constructor for engine, routing fix, memory, modes, RAG, grow.
-- `scripts/train_atom_from_scratch.py` — the trainer. Refuses ids ≥ 266.
+- `scripts/train_atom_from_scratch.py` — CPU smoke and the from-zero entry. B=1, resets thought every step. Not the 1B throughput reference.
+- `scripts/fast4gpu_boost_v4.py` — the 1B trainer of reference. Parent loop, Atom vocab.
 - `scripts/pod_atom_from_scratch.sh` — does not open a pod. Refuses unless `ATOM_POD=1` on a box that already has the GPU.
 - `data/atom_corpus.i16` — 1,059,743 Atom ids. A starter. Not the phase-2 stream.
 
@@ -78,6 +79,18 @@ After those two fixes, a small model that had memorized `abcdef Fractus 12345. `
 - 1B shape: ~0.99B total, ~119.6M active/token, top-2 of 128.
 - Data target on active params: ~2.4B Atom ids. Have 1.06M.
 - Parent speech gate, still the gate here: greedy PREFIX unique@40. On the x8 run, CE 5–8 coexisted with unique@40 around 3.3. NO-GO.
+
+## Throughput
+
+Calendar from the measured parent run, not from a peak-FLOP story.
+
+- The 1B trainer of reference is `scripts/fast4gpu_boost_v4.py`, not `train_atom_from_scratch.py` (that one is a B=1 smoke that resets thought every step).
+- Measured base: ~1,000 tok/s per RTX 5090 at B=4, seq 128, chunked attention. About 990 tok/s/GPU on the 27–28 Aug SS night, ~670 at B=2, ~840–940 on the QuickPod resume. B=5 was refused, OOM risk.
+- At that speed: 2.4B ids is ~28 days on 1 GPU, ~7 days on 4. 13B ids is ~5–6 weeks on 4. Linear scaling assumed.
+- 1,000 tok/s on ~120M active params is ~0.7 TFLOPS, under 1% of a 5090 FP32 peak. That is the same fact as "the step is the bottleneck": the step keeps the card from working. It is not unused headroom you can switch on.
+- A half-day run is a peak-FLOP ceiling (6 × 2.4B × 120M ≈ 1.7×10¹⁸ ops). No measurement on this body supports it. Do not quote it as a plan.
+- Before optimizing a kernel, measure where memory goes (activations per component, state kept for backward, MoE buffers) and how many tokens each expert sees per step. Top-2 of 128 at B=4 means tiny matmuls. If the benchmark confirms that, the lever is freeing memory to raise the batch, not a faster kernel.
+- Vocab 266 shrinks the head and the CE. It does not shrink the MoE. Do not expect it to 10× the step by itself.
 
 ## If you are unsure
 
