@@ -217,6 +217,23 @@ Compare TF ids/s, not wall. The B=1 smoke was wall 1,180 / TF 1,878 / SS 1,968 w
 
 In every SUMMARY, keep `SS_RATE` fixed and record `ids_ss / ids_tf`. Wall numbers are not comparable across runs otherwise.
 
+## GPU benchmark, 2026-10-09, 4× RTX 5090
+
+Pod: `15.204.161.174:44324`. Driver 581.57, CUDA 13.0. Stock torch 2.2.1 has no sm_120 kernel. Installed `torch==2.7.1+cu128`. Compute works.
+
+1B shape is **1.86B params**, not 0.99B. The blocks hold both the stacked low-rank factors (`moe.U1/V1/U2/V2`, ~55M per block) and a full `LazyStructuredSirenLinear` per expert (128 experts × 2 stages). The stacked factors are the forward. The per-expert modules are the grow copy. Count them once.
+
+Rates on one 5090, seq 128, `SS_RATE=0`, `PROBE_EVERY=0`:
+
+| B | compile | TF ids/s | mem_peak | note |
+|---|---|---|---|---|
+| 2 | no | 38 | 19.6 GB | |
+| 2 | yes | ~128 | | manual, 2.0s/step after warmup |
+| 4 | yes | 10.5 | 49.7 GB | spilled |
+| 8 | yes | — | — | OOM |
+
+The GPU does ~200 ms of real work per step at B=2. The wall is ~6.7 s without compile, ~2 s with. The card is idle. The bottleneck is Python, not the kernels. `torch.compile` helps but does not close it. A Triton attention (and a compiled MoE) is the next lever. Do not start the 2.4B-id run at 38 ids/s. That is about two years on one card.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
