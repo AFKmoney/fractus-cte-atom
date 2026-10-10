@@ -64,18 +64,20 @@ class CTEBlock(nn.Module):
         )
         self.norm_moe = nn.LayerNorm(d_model)
 
-        # Per-block persistent state.
-        nH_dH = n_heads * d_head
-        self.register_buffer("attn_S", torch.zeros(1, nH_dH, nH_dH))
-        self.register_buffer("attn_z", torch.zeros(1, nH_dH))
+        # Per-block persistent state. Stored per head: only the 20 diagonal
+        # 64x64 blocks of the old (B, 1280, 1280) were non-zero. The full
+        # matrix was 95% zeros, ~105 MB per row across 16 blocks. Per-head
+        # (B, n_heads, d_head, d_head) divides that by 20.
+        self.register_buffer("attn_S", torch.zeros(1, n_heads, d_head, d_head))
+        self.register_buffer("attn_z", torch.zeros(1, n_heads, d_head))
         self.register_buffer("kuramoto_phases", torch.zeros(1, 1, n_oscillators))
 
     def reset_state(self, batch_size: int = 1):
         """Zero this block's persistent state."""
         device = self.attn_S.device
-        d = self.attn.n_heads * self.attn.d_head
-        self.attn_S = torch.zeros(batch_size, d, d, device=device)
-        self.attn_z = torch.zeros(batch_size, d, device=device)
+        nH, dH = self.attn.n_heads, self.attn.d_head
+        self.attn_S = torch.zeros(batch_size, nH, dH, dH, device=device)
+        self.attn_z = torch.zeros(batch_size, nH, dH, device=device)
         self.kuramoto_phases = torch.zeros(
             batch_size, 1, self.kuramoto.N, device=device)
 
@@ -97,21 +99,17 @@ class CTEBlock(nn.Module):
             kh = k_feat[:, :, hd * D:(hd + 1) * D]
             vh = v[:, :, hd * D:(hd + 1) * D]
             qh = q_feat[:, 0, hd * D:(hd + 1) * D]
-            s_start = hd * D
-            s_end = (hd + 1) * D
             outer = (kh.squeeze(1).unsqueeze(2) * vh.squeeze(1).unsqueeze(1))
             self.attn_S = self.attn_S.clone()
-            self.attn_S[:, s_start:s_end, s_start:s_end] += outer.detach()
+            self.attn_S[:, hd] += outer.detach()
             self.attn_z = self.attn_z.clone()
-            self.attn_z[:, s_start:s_end] += kh.squeeze(1).detach()
+            self.attn_z[:, hd] += kh.squeeze(1).detach()
 
         attn_out = torch.zeros_like(h)
         for hd in range(attn.n_heads):
-            s_start = hd * D
-            s_end = (hd + 1) * D
             qh = q_feat[:, 0, hd * D:(hd + 1) * D]
-            S_h = self.attn_S[:, s_start:s_end, s_start:s_end]
-            z_h = self.attn_z[:, s_start:s_end]
+            S_h = self.attn_S[:, hd]
+            z_h = self.attn_z[:, hd]
             num = torch.bmm(qh.unsqueeze(1), S_h).squeeze(1)
             denom = (qh * z_h).sum(dim=-1, keepdim=True)
             safe = denom.abs() > 1e-10
@@ -137,20 +135,15 @@ class CTEBlock(nn.Module):
         return h, lb_loss
 
     def _build_carry(self, B: int):
-        """Flatten the block-diagonal carry (attn_S, attn_z) for the kernel."""
+        """Flatten the per-head carry (attn_S, attn_z) for the kernel.
+
+        attn_S is (B, nH, dH, dH). No loop, no full-matrix slice.
+        """
         attn = self.attn
         nH, dH, nL = attn.n_heads, attn.d_head, attn.n_levels
-        carry_S_per_head = torch.stack([
-            self.attn_S[:, hd * dH:(hd + 1) * dH, hd * dH:(hd + 1) * dH]
-            for hd in range(nH)
-        ], dim=1)
-        carry_z_per_head = torch.stack([
-            self.attn_z[:, hd * dH:(hd + 1) * dH]
-            for hd in range(nH)
-        ], dim=1)
-        carry_S_flat = carry_S_per_head.unsqueeze(1).expand(
+        carry_S_flat = self.attn_S.unsqueeze(1).expand(
             B, nL, nH, dH, dH).reshape(B * nL * nH, dH, dH)
-        carry_z_flat = carry_z_per_head.unsqueeze(1).expand(
+        carry_z_flat = self.attn_z.unsqueeze(1).expand(
             B, nL, nH, dH).reshape(B * nL * nH, dH)
         return carry_S_flat, carry_z_flat
 
@@ -213,19 +206,14 @@ class CTEBlock(nn.Module):
         return h, lb_loss, S_final, z_final, theta
 
     def _store_carry(self, B: int, S_final, z_final):
-        """Reduce flat kernel states to the block-diagonal carry and store."""
+        """Reduce flat kernel states to the per-head carry and store.
+
+        No full (B, 1280, 1280) allocation. The mean over levels is the carry.
+        """
         attn = self.attn
         nH, dH, nL = attn.n_heads, attn.d_head, attn.n_levels
-        S_reshaped = S_final.reshape(B, nL, nH, dH, dH).mean(dim=1)
-        z_reshaped = z_final.reshape(B, nL, nH, dH).mean(dim=1)
-        new_S = torch.zeros(B, nH * dH, nH * dH, device=S_final.device,
-                            dtype=S_final.dtype)
-        new_z = torch.zeros(B, nH * dH, device=S_final.device, dtype=S_final.dtype)
-        for hd in range(nH):
-            new_S[:, hd * dH:(hd + 1) * dH, hd * dH:(hd + 1) * dH] = S_reshaped[:, hd]
-            new_z[:, hd * dH:(hd + 1) * dH] = z_reshaped[:, hd]
-        self.attn_S = new_S.detach()
-        self.attn_z = new_z.detach()
+        self.attn_S = S_final.reshape(B, nL, nH, dH, dH).mean(dim=1).detach()
+        self.attn_z = z_final.reshape(B, nL, nH, dH).mean(dim=1).detach()
 
     def tick_chunk_core(self, h: torch.Tensor) -> tuple:
         """Process a chunk thought state h: (B, C, d_model) → (B, C, d_model).

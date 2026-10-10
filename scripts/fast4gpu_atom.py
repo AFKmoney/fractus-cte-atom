@@ -276,8 +276,8 @@ def main() -> None:
         keep = (~mask).to(e.thought_state.dtype)
         e.thought_state = e.thought_state * keep.view(-1, 1, 1)
         for blk in e.blocks:
-            blk.attn_S = blk.attn_S * keep.view(-1, 1, 1).to(blk.attn_S.dtype)
-            blk.attn_z = blk.attn_z * keep.view(-1, 1).to(blk.attn_z.dtype)
+            blk.attn_S = blk.attn_S * keep.view(-1, 1, 1, 1).to(blk.attn_S.dtype)
+            blk.attn_z = blk.attn_z * keep.view(-1, 1, 1).to(blk.attn_z.dtype)
             blk.kuramoto_phases = blk.kuramoto_phases * keep.view(-1, 1, 1).to(blk.kuramoto_phases.dtype)
 
     ckpt_out.parent.mkdir(parents=True, exist_ok=True)
@@ -346,8 +346,11 @@ def main() -> None:
         if bool(bos_rows.any()):
             reset_rows(bos_rows)
         pos = off * B
-        ss_prob = ss_prob_at(pos, ss_p0, ss_p1, ss_ramp)
-        carry = snapshot_carry(payload())
+        # Snapshot only when the SS pass will run. Cloning the carry every
+        # step costs ~105 MB per row (16 blocks of 1280x1280), which is
+        # ~6.7 GB at B=64, for a restore that never happens when SS is off.
+        do_ss = ss_rate > 0 and should_ss(ss_rate)
+        carry = snapshot_carry(payload()) if do_ss else None
 
         sync(); t0 = time.time()
         with autocast():
@@ -366,7 +369,7 @@ def main() -> None:
         ema_tf = tf_v if ema_tf is None else ema_beta * ema_tf + (1 - ema_beta) * tf_v
 
         ss_v = None
-        if ss_rate > 0 and should_ss(ss_rate):
+        if do_ss:
             restore_carry(payload(), carry)
             sync(); t0 = time.time()
             with autocast():

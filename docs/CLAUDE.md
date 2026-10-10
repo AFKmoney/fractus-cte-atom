@@ -283,6 +283,24 @@ Fixed with one `bincount`, no sync. Remeasured:
 
 The GPU still does ~256 ms of real work. The wall is 606 ms. There is more to take, but the sync was the first lever.
 
+## Carry per head, snapshot only when SS, 2026-10-09
+
+`attn_S` was `(B, 1280, 1280)`, but only the 20 diagonal 64×64 blocks were non-zero. That is 95% zeros, ~105 MB per row across 16 blocks, ~6.7 GB at B=64. Now stored per head as `(B, 20, 64, 64)`. Measured: **5.2 MB per row**. `_build_carry` and `_store_carry` no longer loop over heads or allocate the full matrix.
+
+`snapshot_carry` ran every step, even with `SS_RATE=0`. It now runs only when the SS pass will. That removes another ~6.7 GB clone at B=64.
+
+`BLOCK_CKPT=1`, per-head carry, one 5090:
+
+| B | ids/s | mem |
+|---|---|---|
+| 2 | 329 | 12.4 GB |
+| 4 | 603 | 13.7 GB |
+| 8 | 778 | 16.2 GB |
+| 16 | 885 | 21.3 GB |
+| 32 | OOM | — |
+
+B=32 still OOMs. The wall is the MoE `index_select`, which copies weights per token. Grouped MoE is the next lever for B=64.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
