@@ -53,6 +53,13 @@ class KuramotoLayer(nn.Module):
         self.omega = nn.Parameter(torch.empty(n_oscillators).uniform_(-0.35, 0.35))
         self.coupling_u = nn.Parameter(torch.empty(n_oscillators, rank).uniform_(-1.0, 1.0))
         self.coupling_lambda = nn.Parameter(torch.empty(rank).uniform_(0.01, 0.51))
+        # Learned phase from the hidden. The old mean(dim=-1) of a LayerNorm'd
+        # h is ~0, so theta_bar was flat and every token hit the same experts.
+        # std=1 on a unit-variance h gives an initial phase spread of order 1 rad,
+        # comparable to the expert spacing at E=8 and larger than at E=128.
+        self.phase_proj = nn.Linear(d_model, 1, bias=True)
+        nn.init.normal_(self.phase_proj.weight, std=1.0)
+        nn.init.zeros_(self.phase_proj.bias)
 
     def _derivative(self, theta: torch.Tensor) -> torch.Tensor:
         """dθ/dt for phases theta of shape (..., N). Low-rank form O(N·r)."""
@@ -113,11 +120,16 @@ class KuramotoLayer(nn.Module):
         return theta
 
     def _encode_from_hidden(self, hidden: torch.Tensor) -> torch.Tensor:
-        """Initial phases from hidden states (B, L, d_model) → (B, L, N)."""
-        hidden_mean = hidden.mean(dim=-1) * self.TWO_PI  # (B, L)
+        """Initial phases from hidden states (B, L, d_model) → (B, L, N).
+
+        phase_proj maps h to a scalar phase. The old mean(dim=-1) of a
+        LayerNorm'd h was ~0, so every token started at the same point on
+        the circle and the gate always picked the same experts.
+        """
+        phase = self.phase_proj(hidden).squeeze(-1)  # (B, L)
         offsets = torch.arange(self.N, dtype=hidden.dtype, device=hidden.device)
         offsets = offsets / self.N * self.TWO_PI
-        theta_init = hidden_mean.unsqueeze(-1) + offsets.view(1, 1, self.N)
+        theta_init = phase.unsqueeze(-1) + offsets.view(1, 1, self.N)
         return torch.remainder(theta_init, self.TWO_PI)
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:

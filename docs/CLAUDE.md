@@ -151,7 +151,18 @@ Across both blocks, 4–5 experts alive in total. The counter was not the whole 
 
 θ̄ is the only thing the gate reads (`atan2` of the summed sin/cos). Its std across positions is far below the expert spacing. Every token lands on the same two experts. Raising r does not fix this: r is how synchronized the oscillators are, not how far θ̄ moves from token to token. At 128 experts the spacing is 2.8°, and the ratio is still under 1.
 
-The lever is not T. It is the range of θ that `_encode_from_hidden` produces (it uses the mean of a LayerNorm'd h, which starts near 0), or the `kappa / temperature` that sets how wide a gate is. Do not treat "2 alive" from the counter as a measurement. Count `topk_idx` over all positions and blocks.
+Fixed. `_encode_from_hidden` no longer uses `mean(dim=-1)`. LayerNorm makes that mean ~0, so every token started at the same point on the circle. It now uses a learned `phase_proj` (`Linear(d_model, 1)`, weight std 1). On a unit-variance h that gives an initial phase spread of order 1 rad.
+
+Remeasured, same smoke, per-token routing, all positions:
+
+| setup | θ̄ std | ratio vs 2π/E | alive / block |
+|---|---|---|---|
+| E=8, fresh | 1.8–2.1 | 2.3–2.7 | 8/8 |
+| E=8, 100 steps | 1.6–2.6 | 2.0–3.3 | 8/8 |
+| E=128, fresh | 1.3–1.7 | 25–36 | 45–49/128 |
+| E=128, 100 steps | 0.23–1.9 | 4.7–38 | 20–30/128 |
+
+The causal leak stays at 0. The MoE is no longer structurally dead. At 128 experts the count drops as the model concentrates; that is learning, not the old flat-phase collapse.
 
 ## If you are unsure
 
