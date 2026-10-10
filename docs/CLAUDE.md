@@ -82,15 +82,15 @@ After those two fixes, a small model that had memorized `abcdef Fractus 12345. `
 
 ## Throughput
 
-Calendar from the measured parent run, not from a peak-FLOP story.
+The parent number is tokens. This fork counts Atom ids. Do not mix them.
 
-- The 1B trainer of reference is `scripts/fast4gpu_boost_v4.py`, not `train_atom_from_scratch.py` (that one is a B=1 smoke that resets thought every step).
-- Measured base: ~1,000 tok/s per RTX 5090 at B=4, seq 128, chunked attention. About 990 tok/s/GPU on the 27–28 Aug SS night, ~670 at B=2, ~840–940 on the QuickPod resume. B=5 was refused, OOM risk.
-- At that speed: 2.4B ids is ~28 days on 1 GPU, ~7 days on 4. 13B ids is ~5–6 weeks on 4. Linear scaling assumed.
-- 1,000 tok/s on ~120M active params is ~0.7 TFLOPS, under 1% of a 5090 FP32 peak. That is the same fact as "the step is the bottleneck": the step keeps the card from working. It is not unused headroom you can switch on.
-- A half-day run is a peak-FLOP ceiling (6 × 2.4B × 120M ≈ 1.7×10¹⁸ ops). No measurement on this body supports it. Do not quote it as a plan.
-- Before optimizing a kernel, measure where memory goes (activations per component, state kept for backward, MoE buffers) and how many tokens each expert sees per step. Top-2 of 128 at B=4 means tiny matmuls. If the benchmark confirms that, the lever is freeing memory to raise the batch, not a faster kernel.
-- Vocab 266 shrinks the head and the CE. It does not shrink the MoE. Do not expect it to 10× the step by itself.
+- The ~1,000/s figure is from the x8 run: GPT-2 BPE tokens, vocab 50257, `fast4gpu_boost_v4.py`, B=4, seq 128, chunked attention, RTX 5090. About 990 tok/s/GPU on the 27–28 Aug SS night, ~670 at B=2, ~840–940 on the QuickPod resume. B=5 was refused, OOM risk. That is a token measurement. It is not an Atom measurement.
+- An Atom id is a byte or a boundary marker. One BPE token is several bytes. 2.4B Atom ids is less text than 2.4B BPE tokens. The training loop still counts positions, and a position is now an Atom id.
+- No 5090 has been timed on this fork. Do not write "1,000 Atom ids/s" as if it had been measured. The body (attention, Kuramoto, MoE) costs per position either way. The head is the part that changed: 266 instead of 50257, so CE and the tied embed are cheaper. That can make a step faster. It does not make the old token rate the new id rate.
+- If, and only if, a later benchmark shows ~1,000 Atom ids/s/GPU, then 2.4B ids is ~28 days on 1 GPU and ~7 on 4. Until that benchmark exists, those days are a transposition, not a plan.
+- 1,000 positions/s on ~120M active params is ~0.7 TFLOPS, under 1% of a 5090 FP32 peak. Same fact as "the step is the bottleneck." A half-day run is a peak-FLOP ceiling (6 × 2.4B × 120M ≈ 1.7×10¹⁸ ops). No measurement on this body supports it.
+- Before optimizing a kernel, measure where memory goes (activations per component, state kept for backward, MoE buffers) and how many Atom ids each expert sees per step. Top-2 of 128 at B=4 means tiny matmuls. If the benchmark confirms that, the lever is freeing memory to raise the batch, not a faster kernel.
+- The 1B trainer of reference is `scripts/fast4gpu_boost_v4.py`. `train_atom_from_scratch.py` is a B=1 smoke that resets thought every step.
 
 ## If you are unsure
 

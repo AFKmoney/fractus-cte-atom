@@ -76,7 +76,7 @@ Not a transformer. Residual thought `h`, then per block: fractal linear attentio
 
 1B shape: `d_model=1280`, 16 blocks, 20 heads, 128 experts, top-2, `expert_d_ff=2048`, `siren_rank=64`, `n_levels=2`. Counted without allocating the weights: about **0.99B** total, **119.6M** active per token. The old 1.05B figure included the 50257 head. Do not quote it for this fork.
 
-Chinchilla on active params: `20 × 119.6M ≈ 2.4B` Atom ids. Top-4 would roughly double the active expert cost and the data target. 2 of 128 is the parent router, not a new choice. 4B Atom ids train faster than 4B BPE tokens, because the head is 266 instead of 50257. They are less text, because an id is a byte.
+Chinchilla on active params: `20 × 119.6M ≈ 2.4B` Atom ids, not BPE tokens. An id is a byte or a boundary. 2.4B ids is less text than 2.4B GPT-2 tokens. Top-4 would roughly double the active expert cost and the data target. 2 of 128 is the parent router, not a new choice. The old ~1,000/s figure is BPE tokens on the x8 run. It has not been remeasured in Atom ids.
 
 ## Train
 
