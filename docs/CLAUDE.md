@@ -121,6 +121,27 @@ At T=0.4, one step matches four. At dt=2.0, RK4 is no longer the same trajectory
 
 The model does not read r. It reads MoE gates. On this fresh smoke (8 experts, top-2), alive experts stayed 2/8 and normalized dispatch entropy stayed ~0.51 at every T above. r moved. The gate did not. Do not treat a higher r as more living experts until a small train measures both. Do not change the default `n_steps=1, dt=0.1` until that train exists. Fixing T before the first real run is a setting. Changing it after is retuning a clock the weights were trained on.
 
+## Chunk routing
+
+`_tick_chunk_core_pure` routes the whole chunk with the last position's θ:
+
+```python
+phases_last = theta[:, -1:, :]
+phases_in = phases_last.expand(-1, C, -1)
+```
+
+Generation (`tick_single`) routes with `theta[:, 0:1]`, the current token. Same lines in the parent. Inherited, not introduced here.
+
+Structural consequences: one routing decision per chunk per block, and a possible causal leak, because position t is gated by a θ computed from h at C−1.
+
+Measured on a fresh smoke, both at default T and at T=2:
+
+- Changing only the last id moves the last position's logits (~0.02–0.03). Positions 0..C−2 stay at 0, or at ~1e-4, float noise.
+- `theta[:, 0]` and `theta[:, -1]` differ by ~1e-7. `_encode_from_hidden` uses the mean of a LayerNorm'd h, which is ~0, so phases barely depend on position until the clock has something to integrate.
+- Alive experts stayed 2/8. The "2 alive" count was this expand, not a T effect.
+
+The leak is in the code. It is inert while θ is flat. It becomes real when phases start depending on position. Do not switch to `phases_in = theta` (per-token, causal, aligned with generation) until a small train shows the leak is nonzero and the gate does not get worse. That switch also changes MoE cost. Measure ids/s if it is made.
+
 ## If you are unsure
 
 Stop. Say what you measured. Do not invent a last session, do not launch training from memory, and do not "simplify" the body to make a demo look like a transformer.
