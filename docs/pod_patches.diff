@@ -1,0 +1,71 @@
+--- a/scripts/fast4gpu_atom.py
++++ b/scripts/fast4gpu_atom.py
+@@ -137,6 +137,11 @@ def build_engine(scale: str, ckpt_in: str | None, log):
+         raise SystemExit(f"{ckpt_in}: config lacks {missing}; cannot rebuild the body exactly")
+     cfg = {k: ck_cfg[k] for k in CFG_KEYS}
+     eng = ContinuousThoughtEngine(vocab_size=VOCAB_SIZE, **cfg)
++    # carry-state buffers are batch-sized (reset to zero at step 1 anyway by reset_thought(B))
++    _msd = eng.state_dict()
++    _bt = ("thought_state", "attn_S", "attn_z", "kuramoto_phases")
++    for k in [k for k in sd if k in _msd and sd[k].shape != _msd[k].shape and k.split(".")[-1] in _bt]:
++        sd[k] = _msd[k]
+     eng.load_state_dict(sd, strict=True)
+     # The routing fix was applied once, at birth. Re-applying omega x4 would compound.
+     if os.environ.get("KURAMOTO_FIX_ON_RESUME", "0") == "1":
+@@ -272,6 +277,21 @@ def main() -> None:
+     else:
+         opt = torch.optim.SGD(eng.parameters(), lr=lr, momentum=0.9)
+ 
++    # --- pod patch: linear LR warmup + optimizer-state save/resume ---
++    warmup_steps = int(os.environ.get("WARMUP_STEPS", "0"))
++    opt_path = ckpt_out.with_suffix(".opt")
++    opt_in = os.environ.get("OPT_IN") or (str(Path(ckpt_in).with_suffix(".opt")) if ckpt_in else None)
++    if ckpt_in and opt_in and os.path.exists(opt_in):
++        opt.load_state_dict(torch.load(opt_in, map_location="cpu", weights_only=False))
++        log(f"optimizer state loaded from {opt_in}")
++    elif ckpt_in:
++        log("WARNING: no optimizer state found, optimizer restarts from zero moments")
++
++    def _apply_lr() -> None:
++        f = min(1.0, (n + 1) / warmup_steps) if warmup_steps > 0 else 1.0
++        for g in opt.param_groups:
++            g["lr"] = lr * f
++
+     def fetch(off: int) -> torch.Tensor:
+         """(B, SEQ+1): row b = lane b, ids [off, off+SEQ]."""
+         rows = [np.asarray(shard[s + off:s + off + SEQ + 1], dtype=np.int64) for s in lane_starts]
+@@ -291,6 +311,10 @@ def main() -> None:
+ 
+     def save(off: int) -> None:
+         ids_done = off * B
++        if os.environ.get("SAVE_OPT", "1") == "1":
++            otmp = opt_path.with_suffix(".opt.tmp")
++            torch.save(opt.state_dict(), otmp)
++            os.replace(otmp, opt_path)
+         tmp = ckpt_out.with_suffix(ckpt_out.suffix + ".tmp")
+         torch.save({
+             "model_state": payload().state_dict(),
+@@ -356,6 +380,7 @@ def main() -> None:
+         # Snapshot only when the SS pass will run. Cloning the carry every
+         # step costs ~105 MB per row (16 blocks of 1280x1280), which is
+         # ~6.7 GB at B=64, for a restore that never happens when SS is off.
++        ss_prob = ss_prob_at(pos, ss_p0, ss_p1, ss_ramp)
+         do_ss = ss_rate > 0 and should_ss(ss_rate)
+         carry = snapshot_carry(payload()) if do_ss else None
+ 
+@@ -368,6 +393,7 @@ def main() -> None:
+             )
+         loss.backward()
+         torch.nn.utils.clip_grad_norm_(eng.parameters(), 1.0)
++        _apply_lr()
+         opt.step()
+         opt.zero_grad(set_to_none=True)
+         sync(); t_tf += time.time() - t0
+@@ -386,6 +412,7 @@ def main() -> None:
+                 )
+             loss2.backward()
+             torch.nn.utils.clip_grad_norm_(eng.parameters(), 1.0)
++            _apply_lr()
+             opt.step()
+             opt.zero_grad(set_to_none=True)
+             sync(); t_ss += time.time() - t0

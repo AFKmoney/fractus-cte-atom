@@ -24,6 +24,63 @@ Atomizer source: [`AFKmoney/atom-ai`](https://github.com/AFKmoney/atom-ai), vend
 
 No x8 checkpoint is in this repo. Do not load one.
 
+## Training log and changes (Oct 2026)
+
+Full chronological log: [`docs/TRAINING_LOG.md`](docs/TRAINING_LOG.md). Raw patch set from the training pod: [`docs/pod_patches.diff`](docs/pod_patches.diff). All changes below are in `scripts/fast4gpu_atom.py`.
+
+### Code fixes (made on the training pod, now committed)
+
+1. **Strict checkpoint load fix.** Resuming failed under `strict=True` because the batch-dependent carry buffers (`thought_state`, `attn_S`, `attn_z`, `kuramoto_phases`) have a different shape when the batch size differs. On load, these buffers are now replaced by the freshly built engine's own buffers (they are reset at step 1 by `reset_thought(B)` anyway).
+2. **Missing `ss_prob` line.** Added `ss_prob = ss_prob_at(pos, ss_p0, ss_p1, ss_ramp)` in the training loop.
+3. **Linear LR warmup** via `WARMUP_STEPS`.
+4. **Optimizer state is saved** to `<ckpt>.opt`. It is written before the `.pt` and the manifest.
+5. **Optimizer state is reloaded on resume** (from `<ckpt>.opt`, or `OPT_IN`). A warning is logged if it is missing.
+
+The pod copy of the script also contains a guard not listed in the original patch notes: if the gradient norm is non-finite, the optimizer step is skipped and a message is logged.
+
+### Experiments
+
+- **SGD plateaus at teacher-forced loss tf ≈ 3.2-3.3 regardless of LR.** LR 7e-4, 3e-3 and 2e-4 all gave about 3.2. The 61M-id SGD run stayed at about 3.3.
+- **AdamW LR 3e-4 reaches tf ≈ 2.24 at 1.64M ids**, from scratch. AdamW LR 1e-3 diverges.
+- **`REPEAT_COEF` term was unbounded.** The repeat log-prob plunged and CE degraded at 0.1, so the run now uses `REPEAT_COEF=0`.
+
+### Throughput (1x RTX 5090, B=16, SEQ=128)
+
+| Setting | ids/s (wall) |
+|---|---|
+| Non-compiled | 3.65k |
+| `COMPILE=1`, `SS_RATE=1` | ~8.9k |
+| `COMPILE=1`, `SS_RATE=0.25` | 13.5k |
+| `COMPILE=1`, `SS_RATE=0` | ~16k |
+| `COMPILE=1`, AdamW, `SS_RATE=0.25` | ~11.4k |
+
+`COMPILE=1` requires `PROBE_EVERY=0`: the probe crashes with `index is on cpu` in `unique40_probe`.
+
+### Current run command
+
+```bash
+OPT=adamw LR=3e-4 WARMUP_STEPS=800 BATCH=16 SEQ=128 COMPILE=1 PROBE_EVERY=0 \
+SS_RATE=0.25 REPEAT_COEF=0 SAVE_EVERY=10000 ... \
+python -u scripts/fast4gpu_atom.py
+```
+
+(`...` stands for the remaining environment variables of the pod launch script: corpus path, output dir, `MAX_STEPS`, etc.)
+
+### How to resume
+
+Set `CKPT_IN` to the checkpoint and `START_TOKEN` to the `start_token_next` value from its manifest. Put the `.opt` file next to the `.pt`. If the `.opt` is loaded, use `WARMUP_STEPS=0`. If it is missing, the script warns and the optimizer restarts from zero moments.
+
+The Hugging Face Hub silently ignores `.pt` files, so checkpoints are stored on the Hub as `.bin`, and the optimizer state as `.opt.bin`. Rename them back to `.pt` / `.opt` before resuming.
+
+### Checkpoints on Hugging Face
+
+- `checkpoints/atom/`: current AdamW run.
+- `checkpoints/atom_sgd_61M/`: archived SGD run (61M ids).
+
+### Vast.ai notes
+
+A rental has an `end_date`. The first pod expired at its contract end. Pick offers whose duration covers the whole run.
+
 ## Philosophy
 
 Three properties, and they are the product.
