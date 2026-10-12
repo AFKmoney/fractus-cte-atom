@@ -287,6 +287,17 @@ def main() -> None:
     elif ckpt_in:
         log("WARNING: no optimizer state found, optimizer restarts from zero moments")
 
+    _nf = {"count": 0}
+
+    def _log_nonfinite() -> None:
+        _nf["count"] += 1
+        c = _nf["count"]
+        if c <= 20 or c % 1000 == 0:
+            bad = [nm for nm, p in eng.named_parameters()
+                   if p.grad is not None and not bool(torch.isfinite(p.grad).all())][:5]
+            log(f"non-finite grad norm at step {n}: optimizer step skipped "
+                f"(skip #{c}) first bad params: {bad}")
+
     def _apply_lr() -> None:
         f = min(1.0, (n + 1) / warmup_steps) if warmup_steps > 0 else 1.0
         for g in opt.param_groups:
@@ -397,7 +408,7 @@ def main() -> None:
         if bool(torch.isfinite(_gn)):
             opt.step()
         else:
-            log(f"non-finite grad norm at step {n}: optimizer step skipped")
+            _log_nonfinite()
         opt.zero_grad(set_to_none=True)
         sync(); t_tf += time.time() - t0
         ids_tf += step_ids
@@ -419,7 +430,7 @@ def main() -> None:
             if bool(torch.isfinite(_gn)):
                 opt.step()
             else:
-                log(f"non-finite grad norm at step {n}: optimizer step skipped")
+                _log_nonfinite()
             opt.zero_grad(set_to_none=True)
             sync(); t_ss += time.time() - t0
             ids_ss += step_ids

@@ -27,7 +27,10 @@ def elu_plus_one(x: torch.Tensor, alpha: float = 1.0) -> torch.Tensor:
     # We use the direct formula (differentiable via torch.where):
     # positive branch: x + 1; negative branch: alpha * (exp(x) - 1) + 1.
     pos = x + 1.0
-    neg = alpha * (torch.exp(x) - 1.0) + 1.0
+    # clamp(max=0): exp only sees the values this branch keeps. Without it,
+    # x > ~88.7 gives exp(x)=inf in the unselected branch and the backward of
+    # torch.where computes 0*inf = NaN.
+    neg = alpha * (torch.exp(x.clamp(max=0.0)) - 1.0) + 1.0
     return torch.where(x > 0, pos, neg)
 
 

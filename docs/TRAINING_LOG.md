@@ -51,3 +51,14 @@ tf = teacher-forced loss. SGD tf ≈ 3.2-3.3 regardless of LR.
 - The Hugging Face Hub silently ignores `.pt` files. Checkpoints are stored as `.bin` and optimizer state as `.opt.bin`.
 - Hugging Face checkpoint locations (`thefinalboss/fractus-cte-atom`): `checkpoints/atom/` is the current AdamW run; `checkpoints/atom_sgd_61M/` is the archived SGD run.
 - Vast.ai: rentals have an `end_date`. Pick offers whose duration covers the whole run.
+
+## 2026-10-12: NaN gradient in `elu_plus_one`
+
+- **Symptom.** The first full-corpus AdamW run (`LR=3e-4`, `WARMUP_STEPS=800`) logged `non-finite grad norm` from step 1769 (~3.6M ids). Within a few hundred steps, nearly every TF and SS step was skipped (about 1.25 skip messages per step). The weights stayed frozen at tf ≈ 2.3 (ema_tf ≈ 2.36) up to ~82M ids. An earlier AdamW run with the same seed crashed at the same point with a device-side assert in `sample_tokens_chunked` (NaN probabilities), because it had no skip guard and the weights became NaN.
+- **Cause.** `fractus/nn/stats.py` `elu_plus_one` computed `exp(x)` for all x in the discarded branch of `torch.where`. For x > ~88.7, `exp(x) = inf`, and the backward gives 0 * inf = NaN while the forward stays finite. AdamW pushed the block-0 key pre-activation to 88.9.
+- **Reproduction (CPU, frozen checkpoint, B=2, SEQ=128).** Max pre-activation 73.1 gave a finite gradient (norm 15.6). Max 88.9 gave a NaN gradient in `observe.weight`, `blocks.0.attn.w_qkv`, `blocks.0.attn.b_qkv` and `blocks.0.norm_attn`. With the fix, the same inputs gave finite gradients (norms 8.5 to 21.7).
+- **Ruled out.** Unbounded carry: documents are ~3.7k ids with a BOS in every lane, so each row resets every ~29 chunks. The repeat term: the SS pass, which has no repeat term, also failed.
+- **Fix.** `neg = alpha * (torch.exp(x.clamp(max=0.0)) - 1.0) + 1.0`. Same forward values, finite gradient. Skips now log the first 5 parameter names with non-finite gradients.
+- **Restart.** The frozen checkpoints were deleted and the run restarted from scratch with the fix (`MAX_STEPS=2153780`, one pass over every lane, `SAVE_EVERY=5000`).
+- **Validation.** Fresh run, 2000 steps, same config: 0 non-finite messages; tf 2.158, ema_tf 2.134 at 4.10M ids (step 2000), past the old failure step.
+- **Attention safe division: tested, not kept.** `num / torch.where(safe, den, 1)` in `fractus/nn/attention.py` was forward bit-identical (fp32 and bf16) but TF throughput fell from 12.7k to 9.4k ids/s at step 400. Reverted; it is not needed for the NaN fix.

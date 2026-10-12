@@ -38,6 +38,10 @@ Full chronological log: [`docs/TRAINING_LOG.md`](docs/TRAINING_LOG.md). Raw patc
 
 The pod copy of the script also contains a guard not listed in the original patch notes: if the gradient norm is non-finite, the optimizer step is skipped and a message is logged.
 
+6. **NaN gradient in `elu_plus_one` (`fractus/nn/stats.py`).** The negative branch computed `exp(x)` on every element, including the ones `torch.where` discards. For x > ~88.7, `exp(x)` is `inf` and the backward of `torch.where` gives 0 * inf = NaN. The forward pass stays finite. In the first AdamW run, the block-0 key pre-activation reached 88.9; from step ~1769 (~3.6M ids) on, the gradient norm was non-finite on almost every step, the guard skipped the optimizer step, and the weights stayed frozen at tf ≈ 2.3. Fix: `neg = alpha * (torch.exp(x.clamp(max=0.0)) - 1.0) + 1.0` (same forward values, finite gradient). Reproduced on CPU with the frozen checkpoint: NaN gradient in `observe.weight` and block-0 `attn.w_qkv`, `attn.b_qkv`, `norm_attn` before the fix, finite gradient after.
+7. **Safe division in linear attention: tested, not kept.** Replacing `num / (den + 1e-20)` by `num / torch.where(safe, den, 1)` in `fractus/nn/attention.py` gave bit-identical forward output (fp32 and bf16), but TF throughput dropped from 12.7k to 9.4k ids/s at step 400. It is not needed for the NaN fix and was reverted.
+8. **Non-finite skip logging.** When a step is skipped, the first 5 parameter names with non-finite gradients are logged (first 20 skips, then every 1000th).
+
 ### Experiments
 
 - **SGD plateaus at teacher-forced loss tf ≈ 3.2-3.3 regardless of LR.** LR 7e-4, 3e-3 and 2e-4 all gave about 3.2. The 61M-id SGD run stayed at about 3.3.
@@ -60,7 +64,7 @@ The pod copy of the script also contains a guard not listed in the original patc
 
 ```bash
 OPT=adamw LR=3e-4 WARMUP_STEPS=800 BATCH=16 SEQ=128 COMPILE=1 PROBE_EVERY=0 \
-SS_RATE=0.25 REPEAT_COEF=0 SAVE_EVERY=10000 ... \
+SS_RATE=0.25 REPEAT_COEF=0 SAVE_EVERY=5000 MAX_STEPS=2153780 ... \
 python -u scripts/fast4gpu_atom.py
 ```
 
