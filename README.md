@@ -42,6 +42,16 @@ The pod copy of the script also contains a guard not listed in the original patc
 7. **Safe division in linear attention: tested, not kept.** Replacing `num / (den + 1e-20)` by `num / torch.where(safe, den, 1)` in `fractus/nn/attention.py` gave bit-identical forward output (fp32 and bf16), but TF throughput dropped from 12.7k to 9.4k ids/s at step 400. It is not needed for the NaN fix and was reverted.
 8. **Non-finite skip logging.** When a step is skipped, the first 5 parameter names with non-finite gradients are logged (first 20 skips, then every 1000th).
 
+9. **Divergences without NaN (Oct 2026).** Two AdamW runs diverged with no non-finite gradient:
+   - LR 3e-4 constant: tf jumped from ~2-3 to 36.7 between 710.2M and 710.7M ids; ema_tf stayed at ~12-50 afterwards. The corpus at that position was checked: no out-of-vocab ids, no zeros, no long runs.
+   - Resume from the 409.6M checkpoint with cosine LR (3e-4 to 3e-5 over the remaining steps): the pre-clip gradient norm was ~40-60 (bucket means 40.5-60.2 between 700M and 780M ids) with no upward trend, then jumped to 583 at 788.9M ids and 3,220 at 789.7M ids (tf 78.9), LR still 2.94e-4. Clipping at 1.0 was already active in both runs and did not prevent either divergence.
+10. **Spike guard, rollback request and good checkpoints** (current run):
+    - Spike guard: the optimizer step is skipped when the pre-clip gradient norm exceeds `max(GN_SKIP_FLOOR=300, GN_SKIP_MULT=10 x EMA)`. Separate EMAs (beta 0.99, accepted steps only) for the TF and SS passes; during the first `GN_GRACE=200` accepted steps the threshold is `GN_GRACE_ABS=3000`. Every skip is logged (`GN SPIKE`).
+    - Rollback request: if more than `MAX_CONSEC_SKIPS=50` consecutive steps contain a skip, or `ema_tf > 4.0` for `ROLLBACK_EMA_STEPS=1000` steps, the trainer writes `ROLLBACK.json` and exits with code 42 without saving. `scripts/atom_runner.py` then restarts from the last good checkpoint with half the LR (and half the LR floor), a 500-step warmup, and the data position where the run stopped; at most 3 rollbacks, then it stops.
+    - Checkpoints: every save is hard-linked into `step_<n>/`; the last 2 are kept (only the newest keeps its `.opt`). A save is marked good (hard-linked into `good/` with `GOOD.json`) when ema_tf < 3.0 and no skip happened in the previous 2,000 steps. If free disk drops below 17 GB, older step dirs are removed before a save.
+    - Push: `scripts/atom_push_good.py` uploads only `good/` to `checkpoints/atom/`, at most every 10 h. The last checkpoint before the divergences is archived in `checkpoints/atom_409M_good/`.
+    - LR: cosine from 1e-4 to 1e-5 over the remaining 1,953,780 steps, 500-step warmup, from the 409.6M checkpoint. The grad norm (`gn`, `gn_ema`), skip count and LR are logged on every log line.
+
 ### Experiments
 
 - **SGD plateaus at teacher-forced loss tf ≈ 3.2-3.3 regardless of LR.** LR 7e-4, 3e-3 and 2e-4 all gave about 3.2. The 61M-id SGD run stayed at about 3.3.

@@ -62,3 +62,11 @@ tf = teacher-forced loss. SGD tf ≈ 3.2-3.3 regardless of LR.
 - **Restart.** The frozen checkpoints were deleted and the run restarted from scratch with the fix (`MAX_STEPS=2153780`, one pass over every lane, `SAVE_EVERY=5000`).
 - **Validation.** Fresh run, 2000 steps, same config: 0 non-finite messages; tf 2.158, ema_tf 2.134 at 4.10M ids (step 2000), past the old failure step.
 - **Attention safe division: tested, not kept.** `num / torch.where(safe, den, 1)` in `fractus/nn/attention.py` was forward bit-identical (fp32 and bf16) but TF throughput fell from 12.7k to 9.4k ids/s at step 400. Reverted; it is not needed for the NaN fix.
+
+## 2026-10-12/13: divergences without NaN, guarded restart
+
+- **Run with LR 3e-4 constant (fresh, full corpus).** Mean tf per 100M ids: 2.07 (0-100M), 2.42-2.61 (100-700M). Between 710.2M and 710.7M ids, tf went from 3.03 to 36.65; ema_tf then stayed at ~12-50 (mean tf 13.9 over 700-780M ids). 0 non-finite gradients. Corpus check at the jump position (all 16 lanes): no ids outside 0-265, no zeros, runs of at most 2-3 identical ids, id histogram close to 10M ids earlier. Stopped at 778.2M ids.
+- **Resume from 409.6M ids with cosine LR (3e-4 to 3e-5 over 1,953,780 steps), clip 1.0.** Pre-clip grad norm bucket means between 700M and 780M ids: 40.5-60.2, no upward trend. At 788.9M ids gn = 583 (tf 30.3), at 789.7M ids gn = 3,220 (tf 78.9), LR 2.94e-4. Later gn values reached 963,532. Stopped at 849.9M ids. An automatic 10 h push had replaced `checkpoints/atom/` with the diverged 829.4M checkpoint; it was restored to the 409.6M checkpoint.
+- **Clipping.** `clip_grad_norm_(..., 1.0)` was active in both runs (it already existed in the script); it did not prevent the divergences.
+- **Guarded restart** from the 409.6M checkpoint: LR 1e-4 cosine to 1e-5, 500-step warmup, spike guard (skip when gn > max(300, 10 x EMA)), rollback request after 50 consecutive skipped steps or ema_tf > 4.0 for 1,000 steps (runner restarts from the last good checkpoint at half LR, max 3 times), rotating step checkpoints with a `good/` copy (ema_tf < 3.0, no skip in the last 2,000 steps), and a push loop that uploads only `good/`. Healthy checkpoint archived in `checkpoints/atom_409M_good/`.
+

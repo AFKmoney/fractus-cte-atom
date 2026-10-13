@@ -15,10 +15,19 @@ index 39f9b80..cf6b342 100644
  
  
 diff --git a/scripts/fast4gpu_atom.py b/scripts/fast4gpu_atom.py
-index faf053c..99a8e77 100644
+index faf053c..9d5f7bd 100644
 --- a/scripts/fast4gpu_atom.py
 +++ b/scripts/fast4gpu_atom.py
-@@ -137,6 +137,11 @@ def build_engine(scale: str, ckpt_in: str | None, log):
+@@ -35,6 +35,8 @@ One GPU benchmark (1B shape, fresh):
+ from __future__ import annotations
+ 
+ import json
++import shutil
++import math
+ import os
+ import sys
+ import time
+@@ -137,6 +139,11 @@ def build_engine(scale: str, ckpt_in: str | None, log):
          raise SystemExit(f"{ckpt_in}: config lacks {missing}; cannot rebuild the body exactly")
      cfg = {k: ck_cfg[k] for k in CFG_KEYS}
      eng = ContinuousThoughtEngine(vocab_size=VOCAB_SIZE, **cfg)
@@ -30,7 +39,7 @@ index faf053c..99a8e77 100644
      eng.load_state_dict(sd, strict=True)
      # The routing fix was applied once, at birth. Re-applying omega x4 would compound.
      if os.environ.get("KURAMOTO_FIX_ON_RESUME", "0") == "1":
-@@ -272,6 +277,32 @@ def main() -> None:
+@@ -272,6 +279,132 @@ def main() -> None:
      else:
          opt = torch.optim.SGD(eng.parameters(), lr=lr, momentum=0.9)
  
@@ -55,18 +64,119 @@ index faf053c..99a8e77 100644
 +            log(f"non-finite grad norm at step {n}: optimizer step skipped "
 +                f"(skip #{c}) first bad params: {bad}")
 +
++    lr_sched = os.environ.get("LR_SCHED", "const")
++    lr_min = float(os.environ.get("LR_MIN", "3e-5"))
++    grad_clip = float(os.environ.get("GRAD_CLIP", "1.0"))
++    log(f"lr schedule={lr_sched} lr_max={lr} lr_min={lr_min} over {max_steps} steps "
++        f"warmup={warmup_steps} grad_clip={grad_clip}")
++    _lr_now = {"lr": lr}
++
 +    def _apply_lr() -> None:
++        # Overrides whatever lr a loaded optimizer state carried, every step.
 +        f = min(1.0, (n + 1) / warmup_steps) if warmup_steps > 0 else 1.0
++        cur = lr
++        if lr_sched == "cosine" and max_steps > 0:
++            t = min(1.0, n / max_steps)
++            cur = lr_min + 0.5 * (lr - lr_min) * (1.0 + math.cos(math.pi * t))
++        cur *= f
++        _lr_now["lr"] = cur
 +        for g in opt.param_groups:
-+            g["lr"] = lr * f
++            g["lr"] = cur
++
++    # --- pod patch: spike guard, rollback request, rotating/good checkpoints ---
++    gn_skip_mult = float(os.environ.get("GN_SKIP_MULT", "10"))
++    gn_skip_floor = float(os.environ.get("GN_SKIP_FLOOR", "300"))
++    gn_grace = int(os.environ.get("GN_GRACE", "200"))          # accepted steps before the EMA is trusted
++    gn_grace_abs = float(os.environ.get("GN_GRACE_ABS", "3000"))  # threshold during the grace period
++    max_consec_skips = int(os.environ.get("MAX_CONSEC_SKIPS", "50"))
++    bad_ema = float(os.environ.get("ROLLBACK_EMA_TF", "4.0"))
++    bad_ema_steps = int(os.environ.get("ROLLBACK_EMA_STEPS", "1000"))
++    ckpt_keep = int(os.environ.get("CKPT_KEEP", "2"))
++    good_ema_max = float(os.environ.get("GOOD_EMA_MAX", "3.0"))
++    good_quiet = int(os.environ.get("GOOD_QUIET_STEPS", "2000"))
++    min_free = float(os.environ.get("MIN_FREE_GB", "17")) * 1e9
++    _gs = {"tf": {"ema": 0.0, "cnt": 0}, "ss": {"ema": 0.0, "cnt": 0},
++           "skips": 0, "consec": 0, "skip_now": False, "last_bad": -10**9, "bad_ema_run": 0}
++
++    def _guard(gn_t, kind: str) -> bool:
++        """True = take the optimizer step. False = skip it (non-finite or spike)."""
++        g = float(gn_t)
++        if not math.isfinite(g):
++            _log_nonfinite()
++            _gs["skip_now"] = True; _gs["last_bad"] = n
++            return False
++        st = _gs[kind]
++        thr = max(gn_skip_floor, gn_skip_mult * st["ema"]) if st["cnt"] >= gn_grace else gn_grace_abs
++        if g > thr:
++            _gs["skips"] += 1; _gs["skip_now"] = True; _gs["last_bad"] = n
++            if _gs["skips"] <= 50 or _gs["skips"] % 100 == 0:
++                log(f"GN SPIKE {kind} gn={g:.1f} > thr={thr:.1f} (ema={st['ema']:.1f}) at step {n}: "
++                    f"step skipped (skip #{_gs['skips']}, consecutive steps with a skip before this one: {_gs['consec']})")
++            return False
++        st["ema"] = g if st["cnt"] == 0 else 0.99 * st["ema"] + 0.01 * g
++        st["cnt"] += 1
++        return True
++
++    def _request_rollback(reason: str, off_now: int) -> None:
++        info = {"reason": reason, "step_in_run": n, "start_token_next": off_now,
++                "ids": off_now * B, "lr_at_stop": _lr_now["lr"],
++                "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
++        (out_dir / "ROLLBACK.json").write_text(json.dumps(info, indent=1))
++        log(f"ROLLBACK REQUESTED: {reason}; exiting with code 42 (no checkpoint written) {info}")
++        sys.exit(42)
++
++    def _rotate_and_mark(off_now: int) -> None:
++        """Hard-link the fresh files into step_<n>/, keep the last ckpt_keep step dirs
++        (only the newest keeps its .opt), and refresh good/ if the window was healthy."""
++        sd_ = out_dir / f"step_{n:08d}"
++        if sd_.exists():
++            shutil.rmtree(sd_)
++        sd_.mkdir()
++        for src in (ckpt_out, opt_path, manifest_out):
++            if src.exists():
++                os.link(src, sd_ / src.name)
++        steps = sorted(d for d in out_dir.glob("step_*") if d.is_dir())
++        for d in steps[:-ckpt_keep]:
++            shutil.rmtree(d, ignore_errors=True)
++        for d in steps[-ckpt_keep:-1]:
++            (d / opt_path.name).unlink(missing_ok=True)
++        quiet = n - _gs["last_bad"]
++        ok = (ema_tf is not None and ema_tf < good_ema_max and quiet >= good_quiet
++              and n >= good_quiet)
++        log(f"ckpt step_{n:08d}: ema_tf={ema_tf if ema_tf is None else round(ema_tf, 3)} "
++            f"steps_since_bad={quiet} -> {'GOOD' if ok else 'not good'}")
++        if ok:
++            gtmp = out_dir / "good.tmp"
++            shutil.rmtree(gtmp, ignore_errors=True)
++            gtmp.mkdir()
++            for f in sd_.iterdir():
++                os.link(f, gtmp / f.name)
++            (gtmp / "GOOD.json").write_text(json.dumps({
++                "step_in_run": n, "ids_processed": off_now * B, "start_token_next": off_now,
++                "ema_tf": ema_tf, "gn_ema_tf": _gs["tf"]["ema"], "skips_total": _gs["skips"],
++                "lr": _lr_now["lr"], "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
++                indent=1))
++            shutil.rmtree(out_dir / "good", ignore_errors=True)
++            os.replace(gtmp, out_dir / "good")
++
++    def _ensure_space() -> None:
++        """Before writing a new checkpoint (~15.5 GB + tmp), drop older step dirs if needed."""
++        if shutil.disk_usage(out_dir).free >= min_free:
++            return
++        for d in sorted(d for d in out_dir.glob("step_*") if d.is_dir())[:-1]:
++            shutil.rmtree(d, ignore_errors=True)
++            log(f"low disk: removed {d.name}")
++            if shutil.disk_usage(out_dir).free >= min_free:
++                return
 +
      def fetch(off: int) -> torch.Tensor:
          """(B, SEQ+1): row b = lane b, ids [off, off+SEQ]."""
          rows = [np.asarray(shard[s + off:s + off + SEQ + 1], dtype=np.int64) for s in lane_starts]
-@@ -291,6 +322,10 @@ def main() -> None:
+@@ -291,6 +424,11 @@ def main() -> None:
  
      def save(off: int) -> None:
          ids_done = off * B
++        _ensure_space()
 +        if os.environ.get("SAVE_OPT", "1") == "1":
 +            otmp = opt_path.with_suffix(".opt.tmp")
 +            torch.save(opt.state_dict(), otmp)
@@ -74,7 +184,15 @@ index faf053c..99a8e77 100644
          tmp = ckpt_out.with_suffix(ckpt_out.suffix + ".tmp")
          torch.save({
              "model_state": payload().state_dict(),
-@@ -356,6 +391,7 @@ def main() -> None:
+@@ -319,6 +457,7 @@ def main() -> None:
+         }, indent=1))
+         os.replace(mtmp, manifest_out)
+         log(f"saved -> {ckpt_out} @ lane offset {off:,} ({ids_done:,} ids)")
++        _rotate_and_mark(off)
+ 
+     def probe(ids_done: int) -> None:
+         snap = snapshot_carry(payload())
+@@ -356,6 +495,7 @@ def main() -> None:
          # Snapshot only when the SS pass will run. Cloning the carry every
          # step costs ~105 MB per row (16 blocks of 1280x1280), which is
          # ~6.7 GB at B=64, for a restore that never happens when SS is off.
@@ -82,33 +200,52 @@ index faf053c..99a8e77 100644
          do_ss = ss_rate > 0 and should_ss(ss_rate)
          carry = snapshot_carry(payload()) if do_ss else None
  
-@@ -367,8 +403,12 @@ def main() -> None:
+@@ -367,8 +507,11 @@ def main() -> None:
                  ce_chunk=ce_chunk, block_ckpt=block_ckpt,
              )
          loss.backward()
 -        torch.nn.utils.clip_grad_norm_(eng.parameters(), 1.0)
 -        opt.step()
-+        _gn = torch.nn.utils.clip_grad_norm_(eng.parameters(), 1.0)
++        _gn = torch.nn.utils.clip_grad_norm_(eng.parameters(), grad_clip)
++        gn_tf = _gn
 +        _apply_lr()
-+        if bool(torch.isfinite(_gn)):
++        if _guard(_gn, "tf"):
 +            opt.step()
-+        else:
-+            _log_nonfinite()
          opt.zero_grad(set_to_none=True)
          sync(); t_tf += time.time() - t0
          ids_tf += step_ids
-@@ -385,8 +425,12 @@ def main() -> None:
+@@ -385,8 +528,10 @@ def main() -> None:
                      ss_prob=ss_prob, lb_coef=lb_coef, ce_chunk=ce_chunk, block_ckpt=False,
                  )
              loss2.backward()
 -            torch.nn.utils.clip_grad_norm_(eng.parameters(), 1.0)
 -            opt.step()
-+            _gn = torch.nn.utils.clip_grad_norm_(eng.parameters(), 1.0)
++            _gn = torch.nn.utils.clip_grad_norm_(eng.parameters(), grad_clip)
 +            _apply_lr()
-+            if bool(torch.isfinite(_gn)):
++            if _guard(_gn, "ss"):
 +                opt.step()
-+            else:
-+                _log_nonfinite()
              opt.zero_grad(set_to_none=True)
              sync(); t_ss += time.time() - t0
              ids_ss += step_ids
+@@ -394,6 +539,13 @@ def main() -> None:
+             ema_ss = ss_v if ema_ss is None else ema_beta * ema_ss + (1 - ema_beta) * ss_v
+ 
+         n += 1
++        _gs["consec"] = _gs["consec"] + 1 if _gs["skip_now"] else 0
++        _gs["skip_now"] = False
++        _gs["bad_ema_run"] = _gs["bad_ema_run"] + 1 if (ema_tf is not None and ema_tf > bad_ema) else 0
++        if _gs["consec"] > max_consec_skips:
++            _request_rollback(f"{_gs['consec']} consecutive skipped steps", off)
++        if _gs["bad_ema_run"] >= bad_ema_steps:
++            _request_rollback(f"ema_tf > {bad_ema} for {bad_ema_steps} steps", off)
+         if n % log_every == 0:
+             wall = max(time.time() - t_wall, 1e-9)
+             mem = ""
+@@ -402,6 +554,7 @@ def main() -> None:
+             ss_s = f" ss={ss_v:.3f} ema_ss={ema_ss:.3f}" if ss_v is not None else ""
+             log(
+                 f"{pos:>12,} tf={tf_v:.3f} ema_tf={ema_tf:.3f}{ss_s} "
++                f"gn={float(gn_tf):.3f} gn_ema={_gs['tf']['ema']:.1f} skips={_gs['skips']} lr={_lr_now['lr']:.3e} "
+                 f"rep={float(ex['repeat'].detach()):.3f} lb={float(ex['lb'].detach()):.3f} | "
+                 f"data {ids_tf / wall:.0f} ids/s wall | "
+                 f"TF {ids_tf / max(t_tf, 1e-9):.0f} ids/s ({t_tf / wall:.0%}) "
