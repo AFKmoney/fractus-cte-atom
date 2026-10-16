@@ -70,3 +70,10 @@ tf = teacher-forced loss. SGD tf ≈ 3.2-3.3 regardless of LR.
 - **Clipping.** `clip_grad_norm_(..., 1.0)` was active in both runs (it already existed in the script); it did not prevent the divergences.
 - **Guarded restart** from the 409.6M checkpoint: LR 1e-4 cosine to 1e-5, 500-step warmup, spike guard (skip when gn > max(300, 10 x EMA)), rollback request after 50 consecutive skipped steps or ema_tf > 4.0 for 1,000 steps (runner restarts from the last good checkpoint at half LR, max 3 times), rotating step checkpoints with a `good/` copy (ema_tf < 3.0, no skip in the last 2,000 steps), and a push loop that uploads only `good/`. Healthy checkpoint archived in `checkpoints/atom_409M_good/`.
 
+
+## 2026-10-13/17: guarded run, rollbacks, LR offset fix, resume at 2.485B ids
+
+- **Rollbacks.** The guarded run rolled back twice to the last `good/` checkpoint at half LR: on Oct 13 and on Oct 14 (00:57 UTC, 51 consecutive skipped steps at 877.8M ids; LR 5e-5 to 2.5e-5, min 2.5e-6).
+- **LR offset fix.** A runner restart reset the cosine schedule to step 0. `scripts/fast4gpu_atom.py` now reads `LR_STEP_OFFSET` and `LR_TOTAL_STEPS` and computes `t = (n + LR_STEP_OFFSET) / LR_TOTAL_STEPS`, so a resume continues the schedule instead of restarting it. The runner (`scripts/atom_runner.py`) stores both values in its state file.
+- **Resume.** On Oct 15 (17:22 UTC) the run resumed from the `good/` checkpoint at 2.485B ids with `WARMUP_STEPS=0`, `LR_STEP_OFFSET=785000`, `LR_TOTAL_STEPS=1725158`, 940,158 steps left. Guards (spike skip, rollback request, `good/` checkpoints, push of `good/` only) unchanged.
+- **Status (Oct 16).** ~3.61B ids, ~11.3k ids/s wall (TF 82%, SS 17%), LR ~5.2e-6, mem peak 29.3 GB. Expected to finish around Oct 17.
