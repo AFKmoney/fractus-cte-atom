@@ -311,8 +311,10 @@ def main() -> None:
         # Overrides whatever lr a loaded optimizer state carried, every step.
         f = min(1.0, (n + 1) / warmup_steps) if warmup_steps > 0 else 1.0
         cur = lr
-        if lr_sched == "cosine" and max_steps > 0:
-            t = min(1.0, n / max_steps)
+        _off = int(os.environ.get("LR_STEP_OFFSET", "0"))
+        _tot = int(os.environ.get("LR_TOTAL_STEPS", "0")) or max_steps
+        if lr_sched == "cosine" and _tot > 0:
+            t = min(1.0, (n + _off) / _tot)
             cur = lr_min + 0.5 * (lr - lr_min) * (1.0 + math.cos(math.pi * t))
         cur *= f
         _lr_now["lr"] = cur

@@ -1,4 +1,4 @@
-"""Pod runner (copied from the training pod; paths are pod paths). Runner for the Atom resume: restarts the trainer from the last GOOD checkpoint
+"""Runner for the Atom resume: restarts the trainer from the last GOOD checkpoint
 with half the LR when the trainer exits with code 42 (rollback request)."""
 import json, os, subprocess, sys, time
 from pathlib import Path
@@ -22,7 +22,8 @@ while True:
     STATE.write_text(json.dumps(st, indent=1))
     env = dict(os.environ, **BASE, LR=str(st["lr"]), LR_MIN=str(st["lr_min"]),
                WARMUP_STEPS=str(st["warmup"]), CKPT_IN=st["ckpt_in"],
-               START_TOKEN=str(st["start_token"]), MAX_STEPS=str(st["steps_left"]))
+               START_TOKEN=str(st["start_token"]), MAX_STEPS=str(st["steps_left"]),
+               LR_STEP_OFFSET=str(st.get("lr_step_offset", 0)), LR_TOTAL_STEPS=str(st.get("lr_total_steps", 0)))
     log("launch", json.dumps(st))
     with open("/workspace/train.log", "a") as f:
         p = subprocess.Popen([sys.executable, "-u", "scripts/fast4gpu_atom.py"], cwd="/workspace/repo",
@@ -41,6 +42,7 @@ while True:
     if good.exists():
         st["ckpt_in"] = str(good)
     st["steps_left"] = max(1, st["steps_left"] - int(rb["step_in_run"]))
+    if st.get("lr_total_steps"): st["lr_step_offset"] = st.get("lr_step_offset", 0) + int(rb["step_in_run"])
     st["start_token"] = int(rb["start_token_next"])   # data keeps moving forward
     st["lr"] /= 2; st["lr_min"] /= 2
     log("rollback", rb, "->", st["ckpt_in"], "lr", st["lr"])
