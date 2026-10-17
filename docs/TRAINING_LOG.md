@@ -77,3 +77,37 @@ tf = teacher-forced loss. SGD tf ≈ 3.2-3.3 regardless of LR.
 - **LR offset fix.** A runner restart reset the cosine schedule to step 0. `scripts/fast4gpu_atom.py` now reads `LR_STEP_OFFSET` and `LR_TOTAL_STEPS` and computes `t = (n + LR_STEP_OFFSET) / LR_TOTAL_STEPS`, so a resume continues the schedule instead of restarting it. The runner (`scripts/atom_runner.py`) stores both values in its state file.
 - **Resume.** On Oct 15 (17:22 UTC) the run resumed from the `good/` checkpoint at 2.485B ids with `WARMUP_STEPS=0`, `LR_STEP_OFFSET=785000`, `LR_TOTAL_STEPS=1725158`, 940,158 steps left. Guards (spike skip, rollback request, `good/` checkpoints, push of `good/` only) unchanged.
 - **Status (Oct 16).** ~3.61B ids, ~11.3k ids/s wall (TF 82%, SS 17%), LR ~5.2e-6, mem peak 29.3 GB. Expected to finish around Oct 17.
+
+## 2026-10-17: v2 trainer (fast4gpu_atom_v2), resume from atom_final
+
+- **Final v1 run.** Finished Oct 17 16:48 UTC at step 940,158: 4,410,941,440 ids (one full pass over every lane), ema_tf 0.332, 3,199 skipped steps in total, 11,279 ids/s wall (TF 82%, SS 17%). Pushed to HF `checkpoints/atom_final/` (commit `d9baf70`).
+- **New file `scripts/fast4gpu_atom_v2.py`** (copy of `fast4gpu_atom.py`, which is unchanged). Every addition is env-gated, and the defaults keep the old behavior:
+  - `SS_RAMP_ORIGIN_IDS`: the SS probability ramp counts ids from this position. In v1 the ramp ran on absolute ids, so on a resume it was already finished. There is no other cap on the SS probability: `ss_prob_at` clamps to [start, end], and the `0.5 *` in `v4_ss_pass` is a loss weight.
+  - `CARRY_DECAY` / `CARRY_CLAMP`: scale or norm-clamp `attn_S` and `attn_z` after each chunk (detached). `thought_state` and the Kuramoto phases are not touched.
+  - `EPOCH_WRAP=1`: `start_token_next` 275,683,840 is exactly the end of each lane (period = ((lane_len-1)//SEQ)*SEQ). The lane offset becomes `off % period`; `START_TOKEN`, `ids_processed` and the manifests stay monotonic; all carries reset at a wrap.
+  - The log line also prints `ss_p`.
+- **New runner and pusher.** `scripts/run_v2.py` (copy of the run8 runner: `/workspace/ckpt_v2`, `run_v2_state.json`, `train_v2.log`, same rollback logic), `scripts/push_good_atom_v2.py` (push_good v2 on `ckpt_v2`, pushes `good/` every 10 h to `checkpoints/atom_v2/` only), `scripts/launch_v2.sh`.
+- **LR=0 carry-decay check.** good/ checkpoint, 60 steps, no weight change, TF loss:
+
+  | attn_S/attn_z decay per chunk | TF loss |
+  |---|---|
+  | 1.0 | 0.5-1.2 |
+  | 0.99 | 0.8-1.3 |
+  | 0.97 | 1.0-2.2 |
+  | 0.9 | 2.2-3.3 |
+  | 0.5 | 6.6-9.8 |
+
+  Uniform is ln 266 = 5.58. The model depends on the absolute size of the carry.
+- **Aborted run 1** (decay 0.5, SS_RATE 1.0, SS 0.5->0.85, LR 1e-4 warmup 500): tf 13.7 at step 200, ema_tf 6.7 at step 800, rollback request at step 1000 (ema_tf > 4 for 1000 steps). Stopped.
+- **Aborted run 2** (decay 0.97, same otherwise): ema_tf 8.3 / 11.9 / 11.3 / 9.4 at steps 200/400/600/800, 30 skips. Stopped.
+- **Isolation tests.** 300 steps each from good/, no runner, scratch dirs. tf / ema_tf / ss at steps 50, 100, 200, 300 (ema starts high because the first chunk starts from an empty carry; "-" = no SS pass on that logged step):
+
+  | test | decay | SS_RATE | LR (warmup 500) | step 50 | step 100 | step 200 | step 300 | skips | ids/s |
+  |---|---|---|---|---|---|---|---|---|---|
+  | T4 | 1.0 | 0.25 | 2.5e-5 | 0.44 / 16.7 / - | 0.69 / 6.46 / 1.84 | 0.65 / 1.36 / - | 0.63 / 0.78 / - | 1 | 11,585 |
+  | T1 | 1.0 | 1.0 | 1e-4 | 2.89 / 17.7 / 4.12 | 3.90 / 8.79 / 5.02 | 8.78 / 8.37 / 9.89 | 7.39 / 9.46 / 9.08 | 9 | 7,478 |
+  | T2 | 1.0 | 0.25 | 1e-4 | 0.46 / 16.7 / - | 0.73 / 6.56 / 1.54 | 2.78 / 2.08 / - | 2.56 / 2.70 / - | 1 | 11,464 |
+  | T3 | 0.97 | 1.0 | 2.5e-5 | 2.09 / 17.6 / 3.32 | 2.05 / 7.74 / 3.55 | 4.06 / 3.91 / 5.38 | 4.34 / 4.06 / 6.17 | 3 | 7,435 |
+
+  SS on every step damages TF even at LR 1e-5 (T1, T3). LR 1e-4 also degrades TF on its own (T2). Carry decay 0.97 is not the main factor. 0 non-finite gradients in all tests.
+- **Launched run (Oct 17 21:45 UTC) = T4 config.** `CARRY_DECAY=1.0 SS_RATE=0.25 SS_PROB_START=0.5 SS_PROB_END=0.85 SS_RAMP_TOKENS=100000000 SS_RAMP_ORIGIN_IDS=4410941440 EPOCH_WRAP=1`, AdamW LR 2.5e-5 cosine to 2.5e-6, warmup 500, `LR_TOTAL_STEPS=MAX_STEPS=2153780` (one pass), weights and optimizer from `ckpt_full/good/` (step_00940158), `START_TOKEN=275683840`, guards and rollback unchanged, `OUT_DIR=/workspace/ckpt_v2`.
