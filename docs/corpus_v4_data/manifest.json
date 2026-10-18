@@ -1,0 +1,198 @@
+{
+ "name": "atom_corpus_v4",
+ "built": "2026-10-18T15:58:48-0700",
+ "builder": "scripts/build_corpus_v4.py",
+ "tokenizer": "atom-fractus-v1",
+ "atomizer": {
+  "pack_mode": "linguistic",
+  "max_span_bytes": 32
+ },
+ "vocab_size": 266,
+ "dtype": "int16 little-endian raw (.i16)",
+ "doc_format": "BOS(257) payload+boundary ids ... <B6>(264) EOS(258), docs concatenated, no padding",
+ "train_order": "train_000.i16, train_001.i16, ... concatenated in name order",
+ "shuffle_seed": 0,
+ "train_ids": 1400295456,
+ "train_docs": 503263,
+ "shards": [
+  {
+   "file": "train_000.i16",
+   "ids": 200003942,
+   "docs": 71626,
+   "bytes": 400007884,
+   "sha256": "32eeeb22a9a6acf9da7c94b6969ef465997c77364ac603cbd54956bbb3fc8e9f"
+  },
+  {
+   "file": "train_001.i16",
+   "ids": 200001162,
+   "docs": 72143,
+   "bytes": 400002324,
+   "sha256": "6bdf16f15ecd5ba3706d7ec8181ff8f6c94655f8bdc1542370d6b6ac07797989"
+  },
+  {
+   "file": "train_002.i16",
+   "ids": 200000988,
+   "docs": 72540,
+   "bytes": 400001976,
+   "sha256": "65a6bba34d06211f935eba7fd19aa10aa6946b7074f5ba8c11997561536a37c7"
+  },
+  {
+   "file": "train_003.i16",
+   "ids": 200007241,
+   "docs": 71328,
+   "bytes": 400014482,
+   "sha256": "bc082c79535389bc246ac3c5c3c0fb7c6a274b34550d207e7140a2cf82c2a751"
+  },
+  {
+   "file": "train_004.i16",
+   "ids": 200000745,
+   "docs": 72520,
+   "bytes": 400001490,
+   "sha256": "d4629ca3fdbdcf42d271a3af4d10d30f845268135f9b59e617ed472837d70ba9"
+  },
+  {
+   "file": "train_005.i16",
+   "ids": 200004314,
+   "docs": 71492,
+   "bytes": 400008628,
+   "sha256": "81528241aae4561e2b438ca09a8957c787a8ac3e6dab5059da321ffa0320bd54"
+  },
+  {
+   "file": "train_006.i16",
+   "ids": 200277064,
+   "docs": 71614,
+   "bytes": 400554128,
+   "sha256": "9462ef1ed59d95d9c51d11c8a3eb75fd5d7806547755f3e320f3e86e89e84b80"
+  }
+ ],
+ "per_source": {
+  "fineweb": {
+   "docs": 143737,
+   "ids": 700003079,
+   "cross_source_dups_dropped": 0,
+   "fetch": {
+    "seen": 144345,
+    "short_or_bad": 146,
+    "dup": 51,
+    "kept": 143737,
+    "ids": 700003079,
+    "bytes": 672820543,
+    "val_docs": 411,
+    "val_ids": 2081341,
+    "val_bytes": 2000435,
+    "secs": 169.0
+   }
+  },
+  "wiki": {
+   "docs": 92985,
+   "ids": 250000472,
+   "cross_source_dups_dropped": 0,
+   "fetch": {
+    "seen": 104759,
+    "short_or_bad": 11149,
+    "dup": 3,
+    "kept": 92985,
+    "ids": 250000472,
+    "bytes": 238816295,
+    "val_docs": 622,
+    "val_ids": 1573099,
+    "val_bytes": 1502601,
+    "secs": 157.5
+   }
+  },
+  "tinystories": {
+   "docs": 238401,
+   "ids": 200000552,
+   "cross_source_dups_dropped": 0,
+   "fetch": {
+    "seen": 239035,
+    "short_or_bad": 13,
+    "dup": 0,
+    "kept": 238401,
+    "ids": 200000552,
+    "bytes": 191625467,
+    "val_docs": 621,
+    "val_ids": 521939,
+    "val_bytes": 500055,
+    "secs": 1148.1
+   }
+  },
+  "pg19": {
+   "docs": 517,
+   "ids": 150085320,
+   "cross_source_dups_dropped": 0,
+   "fetch": {
+    "seen": 525,
+    "short_or_bad": 2,
+    "dup": 0,
+    "kept": 517,
+    "ids": 150085320,
+    "bytes": 143874448,
+    "val_docs": 6,
+    "val_ids": 1422461,
+    "val_bytes": 1363834,
+    "secs": 25.6
+   }
+  },
+  "old": {
+   "docs": 27623,
+   "ids": 100206033,
+   "cross_source_dups_dropped": 0,
+   "fetch": {
+    "shards": 110,
+    "docs": 27623,
+    "ids": 100206033,
+    "dup": 0,
+    "per_shard_target": 909090
+   }
+  }
+ },
+ "share": {
+  "fineweb": 0.4999,
+  "wiki": 0.1785,
+  "tinystories": 0.1428,
+  "pg19": 0.1072,
+  "old": 0.0716
+ },
+ "val": {
+  "file": "val.i16",
+  "ids": 5598840,
+  "docs": 1660,
+  "per_source": {
+   "fineweb": {
+    "docs": 411,
+    "ids": 2081341,
+    "text_bytes": 2000435
+   },
+   "wiki": {
+    "docs": 622,
+    "ids": 1573099,
+    "text_bytes": 1502601
+   },
+   "tinystories": {
+    "docs": 621,
+    "ids": 521939,
+    "text_bytes": 500055
+   },
+   "pg19": {
+    "docs": 6,
+    "ids": 1422461,
+    "text_bytes": 1363834
+   }
+  },
+  "text_bytes": 5366925,
+  "sha256": "a526787829cdd8c5e7445762879c29370c7f54f46d72db3a19b653a7d46fdb89"
+ },
+ "distinct16": {
+  "sample_ids": 100000000,
+  "v4_distinct16": 75355484,
+  "old_distinct16": 182388,
+  "old_full_corpus_distinct16_reference": 243575,
+  "old_full_corpus_ids_reference": 4410941912,
+  "fineweb_distinct16_first_10,000,000": 9245800,
+  "wiki_distinct16_first_10,000,000": 8489230,
+  "tinystories_distinct16_first_10,000,000": 6724692,
+  "pg19_distinct16_first_10,000,000": 9358679,
+  "ratio_v4_over_old": 413.2
+ }
+}
