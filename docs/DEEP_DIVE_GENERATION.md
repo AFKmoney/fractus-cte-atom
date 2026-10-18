@@ -237,3 +237,98 @@ W127 + tokenizer markers on "Once upon a time" produced `astion. <B1>a ste step-
 - it ignores prompts outside the corpus distribution.
 
 The missing piece is on the training/data side (section 7), not in the inference body.
+
+## 9. Decoding strategies (step 5,025,341,440 ids, HF `checkpoints/atom_v3` @ 87c4d701; fp32, fixed path, warm 127; `scripts/gen_best.py`)
+
+Run 2026-10-18, ~18:15-19:55 ET. There are 10 cases:
+- CONT syllogism docs 0/5000/10000 (40 ids after the first 257);
+- 3 short prompts;
+- 3 corpus-template prompts ("Explain X from a practical application angle ... Here is a treatment of **X** ... **Definition.** ") for X = photosynthesis, the capital of France, a short story;
+- an in-corpus control topic (negotiation).
+
+Real-word rate is the share of generated alphabetic words (2+ letters) found in a 370k English word list. It is lenient.
+
+Batched hypotheses (beam rows with stacked carries) agree with the single-row forward on argmax: True. The max abs logit difference is 5.1, the usual fp32/MoE chaos.
+
+| decoder | CONT unique@40 | CONT exact /40 | CONT seqmatch | prompt real-word | template real-word |
+|---|---|---|---|---|---|
+| minp_T0.7_p0.1_ng4 | 17.7 | 5.33 | 0.575 | 0.20 | 0.57 |
+| beam4 | 16.3 | 3.67 | 0.442 | 0.41 | 0.59 |
+| beam8 | 17.0 | 4.33 | 0.333 | 0.36 | 0.68 |
+| greedy | 16.0 | 4.00 | 0.408 | 0.36 | 0.51 |
+| minp_T2_p0.05_ng4 | 18.0 | 4.67 | 0.433 | 0.47 | 0.30 |
+| lookahead_K4_D8 | 17.7 | 4.00 | 0.367 | 0.36 | 0.51 |
+| contrastive_k4_a0.3 | 17.7 | 4.00 | 0.367 | 0.36 | 0.51 |
+| minp_T5_p0.05_ng4 | 19.0 | 3.00 | 0.258 | 0.10 | 0.14 |
+| typical0.9_T5 | 21.0 | 3.33 | 0.317 | 0.07 | 0.00 |
+| minp_T20_p0.05_ng4 | 30.7 | 1.33 | 0.133 | 0.16 | 0.23 |
+
+Ranking: no decoder clearly wins. The top two:
+- **min-p on raw logits (T 0.7, p_min 0.1, no-repeat 4-gram)** is best on CONT (exact 5.3, seqmatch 0.58). This is one seed on 3 docs, so it is noisy.
+- **beam 8** (length-normalized) gives the most real words on prompts and templates (0.52 / 0.68).
+
+The other decoders:
+- Word look-ahead (K 4, D 8) and contrastive search (k 4, α 0.3) reproduce greedy almost exactly. The top-1 id dominates by tens to hundreds of nats, so alternatives never win.
+- Temperatures of 5-20 on raw logits, and typical sampling, produce byte noise.
+
+Raw outputs, min-p T0.7:
+
+| case | generated | true |
+|---|---|---|
+| doc0 | ` <B1>worked thrke emple <B1>(citinntiten fors ` | ` step-<B2>by-step procedure, written <B1>for a` |
+| doc5000 | `ndandationsengle,<B2> formatted as a a befo` | `ndations <B1>angle, formatted as a Q&<B2>A dia` |
+| doc10000 | `aroricatical de-ticnion-fomasengl <B1>ated ` | `oretical foundations <B1>angle, formatted a` |
+| The capital of France is | `omincel <B1>adelonte rsiom ancresiong <B1>al a` | |
+| Once upon a time | `ation real/<B2> decisin siontomerme <B1>anat a` | |
+| Hello | `w d mplyincit mprmizatit <B1>masinitingnto ` | |
+| photosynthesis | `Problempriticeng <B1>on is the prace <B1>of is` | |
+| the capital of France | `Pronal <B1>mprehey.* <B1>mobatining is the pra` | |
+| a short story | `Problelemmatin <B1>is the practice <B1>of ieat` | |
+
+Raw outputs, beam 8:
+
+| case | generated | true |
+|---|---|---|
+| doc0 | ` <B1>compare-and-contrast table description` | ` step-<B2>by-step procedure, written <B1>for a` |
+| doc5000 | `ndatication-sen** <B1>ath-the-skill angle,<B2>` | `ndations <B1>angle, formatted as a Q&<B2>A dia` |
+| doc10000 | `orocicatical frication-fed <B1>alimition-fo` | `oretical foundations <B1>angle, formatted a` |
+| The capital of France is | `omprming <B1>a debuging/error-cor-correctio` | |
+| Once upon a time | `ning <B1>awith its cos clommmistakes tining` | |
+| Hello | `w d mplyinicit mplizit masit mitanionit ` | |
+| photosynthesis | `Problem <B1>mithenking is the practice <B1>of ` | |
+| the capital of France | `Probley <B1>mpraxtis is the practice <B1>of ic` | |
+| a short story | `Problelem <B1>frating is the practice <B1>ofyi` | |
+
+The template format is the only lever that changes the character of the output. With it, every decoder writes the corpus definition scaffold: "Problem thinking is the practice of ...", "... framing is the practice of ...". It does not write the requested topic: photosynthesis becomes "Problem <B1>mithenking", a short story becomes "Problelem framing".
+
+The in-corpus control shows the same failure. On the verbatim corpus prompt for negotiation, encoded identically to the training ids, greedy writes `Analog fthomprmice ...` instead of "Negotiation is the practice of ...".
+
+### 9b. The missing piece: the model does not copy from its own context (`scripts/copy_probe.py`)
+
+Every corpus doc names its topic X three times: in the question line, in "Here is a treatment of **X**", and in "**Definition.** X ...". The 2nd and 3rd mentions are pure in-context copies, 50-300 ids after the first.
+
+TF on 16 training docs (negotiation and syllogisms; fp32, fixed path, real 127-id previous-doc tail):
+
+| span | NLL (nats/id) | top-1 | first id NLL | first id top-1 |
+|---|---|---|---|---|
+| whole doc (first 512 ids) | 2.77 | 0.62 | | |
+| "Here is a treatment of **X**" (copy) | 7.87 | 0.10 | 13.4 | 0.00 |
+| "**Definition.** X" (copy) | 7.24 | 0.12 | 18.6 | 0.00 |
+
+Visual check (negotiation doc 467, teacher-forced argmax):
+```
+true: Here is a treatment of *<B2>*negotiation** from a <B1>comparative
+pred: Hereris a arer rent of *<B2>*ocx rrcl cn** from f caompararive
+```
+
+The model cannot reproduce a word it read about 60 ids earlier, even inside a shard where every doc has the same topic. This holds while it predicts template continuations ("perspective (contra", "** from") well.
+
+Low TF loss comes from scaffold positions. Every slot that must be filled from context (topic names, entities, prompt words) is guessed from the global prior and comes out as letter soup. No decoder can fix this, because the right token is not among the candidates: first-id NLL at copy slots is 12-31 nats.
+
+This is the strongest candidate for the "something we haven't seen". The carried field state (linear attention plus carry plus thought_state) does not provide token-level retrieval of recent content. A corpus where every doc is a recombined template never forced it to learn retrieval: the topic is predictable from the shard.
+
+Suggested next measurements (inference only):
+- an induction-head style probe on random byte strings repeated twice in one chunk vs across chunks;
+- whether copying works within the open 128-id chunk but fails across the chunk boundary, i.e. through the carry.
+
+**Does it speak?** No. With every decoder, the best output is template scaffolding with misspelled slot words. Beam and min-p change a few bytes, not the outcome.
