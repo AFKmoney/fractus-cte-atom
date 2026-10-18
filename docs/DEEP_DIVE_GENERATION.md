@@ -189,4 +189,51 @@ The full list, including T=0.7 / k=20, is in `docs/deep_dive_data/gen_fixed_8500
   3. doc-aligned BOS resets with occasional cold starts, so the cold state is seen;
   4. a validation set of held-out non-template text, tracked alongside ema_tf (ema_tf ~0.5 hides the problem).
 
-Part 2 (hunt: tokenizer-driven markers, scale-free sampling, warm length) is appended below when it finishes.
+
+## 8. Hunt for the missing piece (step_85000, fp32, inference only; `scripts/gen_hunt.py`, raw data in `docs/deep_dive_data/gen_hunt_85000.jsonl`)
+
+Ideas checked:
+
+- **(2) Appending positions as in training vs re-forwarding the open chunk.** Fixed-grid re-forward vs one TF pass: max abs logit diff 2e-4, top-1 agreement 1.000. They are identical.
+- **(3) thought_state injection at chunk boundaries.** It is applied at the same 128-grid boundaries in both paths (the parity above). A different grid (B:128 at C/2) changes logits by up to ~21 (section 2), so the grid must match training. gen_fixed already matches it.
+- **(5) bf16 vs fp32.** The difference is real but second-order: bf16 changes 5-20% of top-1 through the chaotic forward. Greedy CONT exact on step_10000: bf16 2/3/1 vs fp32 5/1/1. Use fp32.
+- **(1) Template vs non-template TF.** See section 4. Template 16-grams reach top-1 0.88; novel 16-grams 0.51; plain English 0.13. This is the dominant effect.
+
+Variants, ranked by CONT exact (mean over docs 0/5000/10000, 40 ids):
+
+| variant | unique@40 | exact /40 | seqmatch | prompt unique@40 |
+|---|---|---|---|---|
+| **W127 greedy** | **19.0** | **4.33** | **0.550** | 18.0 |
+| W64 bytes only, markers never emitted (exact counted on ids, so marker positions count as misses) | 14.7 | 3.67 | 0.442 | 17.3 |
+| W127 + tokenizer-driven markers (model's markers masked; encoder rule re-inserts them) | 16.0 | 3.00 | 0.439 | 17.7 |
+| W64 greedy (previous default) | 15.7 | 2.33 | 0.408 | 17.0 |
+| W64 + tokenizer-driven markers | 17.3 | 1.67 | 0.488 | 17.3 |
+| W64 scale-free sampling (logits/std, T 0.8, top-p 0.9, presence 1.0 over last 32) | 35.3 | 0.67 | 0.142 | 27.7 (random bytes) |
+| W64 tokenizer markers + scale-free sampling | 31.7 | 0.67 | 0.113 | 37.0 (random bytes) |
+
+The ideas, ranked by effect:
+1. **Warm length 127.** This is the training alignment where BOS sits at the last position of a chunk: +2.0 exact and +0.14 seqmatch vs W64. It is the only clear gain.
+2. **Tokenizer-driven markers and bytes-only decoding.** Mixed, within noise (±1 exact). The model's own marker placement is not the problem.
+3. **bf16 → fp32.** Small; use fp32.
+4. **Re-forward vs append, and injection boundaries.** No effect: already exact.
+5. **Repetition-aware scale-free sampling.** Harmful. Dividing by the logit std flattens the near one-hot distributions into random bytes. With the native scale, T 0.7 / k 20 is nearly greedy (section 6).
+
+Raw outputs of the best variant (W127 greedy):
+
+| doc / prompt | generated | true |
+|---|---|---|
+| doc 0 | ` e <B1>princiores writtten <B1>a aprofeson.\n<B3>*` | ` step-<B2>by-step procedure, written <B1>for a` |
+| doc 5000 | `nandath-the-the-skil angl angle,<B2> format` | `ndations <B1>angle, formatted as a Q&<B2>A dia` |
+| doc 10000 | `atorical devefoundatiopm angle, as a bef` | `oretical foundations <B1>angle, formatted a` |
+| The capital of France is | `the <B1>udoreasign. a a ceprising <B1>the nale` | |
+| Once upon a time | `astion. acth <B1>gits a commo ara <B1>pandese-` | |
+| Hello | `d. amanisth de design thinking. <B1>from Wh` | |
+
+W127 + tokenizer markers on "Once upon a time" produced `astion. <B1>a ste step-by-step procedure <B1>fro`: a corpus template phrase, not an answer to the prompt.
+
+**Conclusion.** No remaining train/inference mismatch was found. The fixed path reproduces the training forward bit for bit (fp32), and the best alignment (W127) is now the Space default (Space commit 9f38825). What remains is the model:
+- it reproduces corpus template fragments ("angle, formatted", "step-by-step procedure", "design thinking");
+- it misspells off-template words;
+- it ignores prompts outside the corpus distribution.
+
+The missing piece is on the training/data side (section 7), not in the inference body.

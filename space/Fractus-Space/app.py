@@ -39,7 +39,7 @@ def preload():
     print("[Fractus Atom] downloading", CKPT_REPO, CKPT_FILE, flush=True)
     path = hf_hub_download(CKPT_REPO, CKPT_FILE, repo_type="model")
     eng, cfg = load_checkpoint(path, dtype=torch.float32)   # strict=True inside; raises on any missing/unexpected key
-    GEN = FixedGenerator(eng, final_norm=None, warm=64)
+    GEN = FixedGenerator(eng, final_norm=None, warm=127)
     META.update(ids=cfg.get("ids_processed"), ready=True, load_s=round(time.time() - t, 1))
     print("[Fractus Atom] READY (strict load) ids_processed=%s in %ss" % (META["ids"], META["load_s"]), flush=True)
 
@@ -81,7 +81,7 @@ demo = gr.Interface(
     inputs=[
         gr.Textbox(lines=3, label="Prompt", placeholder="The capital of France is"),
         gr.Slider(8, 64, value=24, step=8, label="max new ids"),
-        gr.Slider(0, 127, value=64, step=1, label="warm start: ids of a real corpus doc tail before BOS (0 = cold BOS)"),
+        gr.Slider(0, 127, value=127, step=1, label="warm start: ids of a real corpus doc tail before BOS (0 = cold BOS)"),
         gr.Slider(0.0, 1.5, value=0.0, step=0.05, label="temperature (0 = greedy)"),
         gr.Slider(1, 50, value=20, step=1, label="top-k (used when temperature > 0)"),
         gr.Radio(["off", "rms", "ln"], value="off", label="final norm before the tied head (trained without: off)"),
@@ -91,9 +91,9 @@ demo = gr.Interface(
     description=STATUS + " | fixed 128-id grid, committed carry, open chunk re-forwarded, warm start. "
                 "Raw byte-level output of an ACI field model; CPU, ~2-5 s per id.",
     examples=[
-        ["The capital of France is", 24, 64, 0.0, 20, "off"],
-        ["Once upon a time", 24, 64, 0.0, 20, "off"],
-        ["Hello", 24, 64, 0.0, 20, "off"],
+        ["The capital of France is", 24, 127, 0.0, 20, "off"],
+        ["Once upon a time", 24, 127, 0.0, 20, "off"],
+        ["Hello", 24, 127, 0.0, 20, "off"],
     ],
     cache_examples=False,
     allow_flagging="never",
