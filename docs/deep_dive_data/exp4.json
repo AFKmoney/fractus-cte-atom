@@ -1,0 +1,66 @@
+{
+ "top2": {
+  "1-4": {
+   "top1_clean": 0.612,
+   "top1_corrupt": 0.412,
+   "nll_clean": 1.872,
+   "nll_corrupt": 4.577
+  },
+  "5-8": {
+   "top1_clean": 0.65,
+   "top1_corrupt": 0.562,
+   "nll_clean": 2.092,
+   "nll_corrupt": 2.232
+  },
+  "9-16": {
+   "top1_clean": 0.631,
+   "top1_corrupt": 0.606,
+   "nll_clean": 2.284,
+   "nll_corrupt": 2.351
+  },
+  "17-32": {
+   "top1_clean": 0.559,
+   "top1_corrupt": 0.538,
+   "nll_clean": 2.864,
+   "nll_corrupt": 2.851
+  },
+  "33-64": {
+   "top1_clean": 0.602,
+   "top1_corrupt": 0.583,
+   "nll_clean": 2.541,
+   "nll_corrupt": 2.626
+  }
+ },
+ "rand": {
+  "1-4": {
+   "top1_clean": 0.612,
+   "top1_corrupt": 0.45,
+   "nll_clean": 1.872,
+   "nll_corrupt": 4.204
+  },
+  "5-8": {
+   "top1_clean": 0.65,
+   "top1_corrupt": 0.65,
+   "nll_clean": 2.092,
+   "nll_corrupt": 2.204
+  },
+  "9-16": {
+   "top1_clean": 0.631,
+   "top1_corrupt": 0.619,
+   "nll_clean": 2.284,
+   "nll_corrupt": 2.558
+  },
+  "17-32": {
+   "top1_clean": 0.559,
+   "top1_corrupt": 0.553,
+   "nll_clean": 2.864,
+   "nll_corrupt": 2.868
+  },
+  "33-64": {
+   "top1_clean": 0.602,
+   "top1_corrupt": 0.598,
+   "nll_clean": 2.541,
+   "nll_corrupt": 2.549
+  }
+ }
+}
