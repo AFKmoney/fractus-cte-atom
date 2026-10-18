@@ -216,3 +216,7 @@ Findings:
 5. bf16 CPU TF numbers drift between two identical runs, e.g. doc 5000 cont C128 1.03 vs 1.21, from thread reduction order on huge logits. Treat differences under ~0.2 nats as noise.
 
 Runtime: 3 docs x 3 configs + TF = 6.8 min (B:512 ~80 s per run, 0.5 ids/s; B:128 ~17 s; A:128 ~27 s). Raw: `/workspace/gen_cont_syllog.jsonl` (`tf_repeat` rows hold the per-position primer NLL).
+
+## SS_RATE 0.50 retest (step_00005000 of the 0.50 run, 4,554,301,440 ids)
+Short prompts (France / Once / Hello) unique@40: A:128 14/13/17 = 14.7/40; A:32 14/17/17 = 16.0; B:128 13/13/15 = 13.7. A:128 verbatim: `'ticiveeeceptice tivere.<B2>Tveeiecoistitati'`, `'s dioesh ct tatioe-atatod porectio dctio'`, `'rutdess hh itorica  calk U <B1>ecuive urati'`.
+CONT (syllogisms docs 0/5000/10000, BOS + 256 ids, 40 greedy): B:512 unique 15/15/19 (16.3), exact 3/5/5 (4.3), prefix 0/4/0; B:128 unique 14/17/19 (16.7), exact 3/5/3 (3.7), prefix 0/4/0. Continuation TF C512 2.72/1.26/1.35 nats/id (0.35 baseline 0.88), so in-corpus TF got worse after the bump. B:512 doc 5000: true `'ndations <B1>angle, formatted as a Q&<B2>A dia'` vs generated `'ndatppplep <B1>pplend whe <B1>ocope ith <B1>mpnci'`. Raw: `/workspace/gen_v2_ss050_5000.jsonl`, `/workspace/gen_cont_v2_ss050_5000.jsonl`.

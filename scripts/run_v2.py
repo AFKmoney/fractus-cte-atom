@@ -8,7 +8,7 @@ LOG = open("/workspace/runner_v2.log", "a", buffering=1)
 def log(*a): print(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), *a, file=LOG, flush=True)
 BASE = dict(CUDA_VISIBLE_DEVICES="0", GPU_ID="0", N_GPU="1", CORPUS="/workspace/atom_corpus.i16",
             BATCH="16", SEQ="128", FRACTUS_ATTN_IMPL="chunked", BLOCK_CKPT="1", COMPILE="1",
-            PROBE_EVERY="0", SS_RATE="0.35", SS_PROB_START="0.5", SS_PROB_END="0.85", SS_RAMP_TOKENS="100000000", SS_RAMP_ORIGIN_IDS="4410941440", CARRY_DECAY="1.0", CARRY_CLAMP="0", EPOCH_WRAP="1", REPEAT_COEF="0", LOG_EVERY="200", SAVE_EVERY="5000",
+            PROBE_EVERY="0", SS_RATE="0.75", SS_PROB_START="0.5", SS_PROB_END="0.85", SS_RAMP_TOKENS="100000000", SS_RAMP_ORIGIN_IDS="4410941440", CARRY_DECAY="1.0", CARRY_CLAMP="0", EPOCH_WRAP="1", REPEAT_COEF="0", LOG_EVERY="200", SAVE_EVERY="5000",
             OUT_DIR=str(OUT), OPT="adamw", LR_SCHED="cosine", GRAD_CLIP="1.0",
             HF_HUB_ENABLE_HF_TRANSFER="1")
 MAX_ROLLBACKS = int(os.environ.get("MAX_ROLLBACKS", "3"))

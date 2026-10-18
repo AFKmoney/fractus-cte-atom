@@ -117,3 +117,13 @@ tf = teacher-forced loss. SGD tf ≈ 3.2-3.3 regardless of LR.
 - **Change.** Only `SS_RATE` in `run_v2.py` BASE env (0.25 -> 0.35). Unchanged: `SS_PROB_START=0.5 SS_PROB_END=0.85 SS_RAMP_TOKENS=100000000 SS_RAMP_ORIGIN_IDS=4410941440` (so ss_p stays 0.85), `CARRY_DECAY=1.0`, `EPOCH_WRAP=1`, LR 2.5e-5 cosine to 2.5e-6 over `LR_TOTAL_STEPS=2153780`, warmup 500, guards.
 - **Resume.** Oct 18 00:33 UTC (20:33 ET) from step_00055000 (4,523,581,440 ids, ema_tf 0.901), weights + optimizer from `/workspace/ckpt_v2_pre_ss035/step_00055000/`, `START_TOKEN=282723840`, `MAX_STEPS=2098780`, `LR_STEP_OFFSET=55000`. Old step dirs moved out of `ckpt_v2/` because the step counter restarts at 0 and step dirs are rotated by name.
 - **Effect (first 20 min).** 0 non-finite; lr back at 2.496e-5 after the 500-step warmup; ss_p 0.850; 10,700 ids/s (11,376 before), SS 22-23% of wall time (17% before); ema_tf 0.98-1.39 (0.84-1.05 before); 31 skipped steps in ~6,800 steps. First good ckpt: new step_00005000, 4,533,821,440 ids, ema_tf 1.115. Gen retest: A:128 unique@40 mean 14.0/40 (no change yet).
+
+## 2026-10-18: v2 SS_RATE ladder 0.35 -> 0.50 -> 0.75
+Each rung changes only `SS_RATE` in `run_v2.py` (backups `run_v2.py.bak_ss035_20261018_0107`, `.bak_ss050_20261018_0145`). Everything else stays the same: ss_p 0.85 (same ramp and origin), CARRY_DECAY 1.0, LR 2.5e-5 cosine to 2.5e-6 over 2,153,780 total steps with the step offset carried forward, warmup 500, guards. Procedure: stop runner/pusher/trainer right after a good promotion, then move that step dir out of `ckpt_v2/` as the single backup (the step counter restarts and step dirs are rotated by name), delete the previous backup, update `run_v2_state.json`, and run `launch_v2.sh`.
+
+| rung | relaunch (ET) | resume ckpt (ids) | start_token / lr_step_offset / steps_left | ids/s before -> after | SS share | ema_tf after | test result |
+|---|---|---|---|---|---|---|---|
+| 0.50 | Oct 17 21:07 | 0.35-run step_10000 (4,544,061,440) | 284,003,840 / 65,000 / 2,088,780 | 10,640 -> 9,750 | 23% -> 30% | 1.35-1.76 | step_5000 (4,554,301,440): A:128 14.7/40, CONT B:512 unique 16.3/40, exact 4.3/40, cont TF 1.78 nats/id mean |
+| 0.75 | Oct 17 21:44 | 0.50-run step_10000 (4,564,541,440) | 285,283,840 / 75,000 / 2,078,780 | 9,720 -> 8,330 | 30% -> 39% | 1.8-2.5 (first 800 steps) | pending |
+
+0 non-finite gradients after either relaunch.
