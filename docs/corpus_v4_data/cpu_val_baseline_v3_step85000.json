@@ -1,0 +1,1 @@
+{"ckpt": "/workspace/ckpt_v3_85000/fractus_atom_1b_gpu0.pt", "ids_processed": 4810301440, "chunks": 8, "lanes": 4, "fineweb": 19.811, "wiki": 23.5968, "pg19": 425.332, "tinystories": 24.6891, "old_templated": 2.8536}

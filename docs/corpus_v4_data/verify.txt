@@ -1,0 +1,4 @@
+fineweb {'docs': 150, 'identical': 150, 'bytes': 645263}
+wiki {'docs': 150, 'identical': 150, 'bytes': 390856}
+tinystories {'docs': 150, 'identical': 150, 'bytes': 120116}
+{"pg19":{"docs":40,"identical":40,"bytes":782789}}
