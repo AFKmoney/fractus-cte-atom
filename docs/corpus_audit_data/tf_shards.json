@@ -1,0 +1,142 @@
+{
+ "ckpt": "/workspace/ckpt_v3_85000/fractus_atom_1b_gpu0.pt",
+ "meta": {},
+ "rows": [
+  {
+   "set": "understanding__inferential_comprehension",
+   "doc": 5393,
+   "n": 512,
+   "nll": 2.3207948207855225,
+   "top1": 0.6379647850990295,
+   "nll_first64": 4.622223854064941,
+   "top1_first64": 0.390625,
+   "secs": 35.64359664916992
+  },
+  {
+   "set": "understanding__inferential_comprehension",
+   "doc": 5834,
+   "n": 512,
+   "nll": 2.977736711502075,
+   "top1": 0.5890411138534546,
+   "nll_first64": 4.134280204772949,
+   "top1_first64": 0.3125,
+   "secs": 35.79215097427368
+  },
+  {
+   "set": "understanding__inferential_comprehension",
+   "doc": 8608,
+   "n": 512,
+   "nll": 2.4484705924987793,
+   "top1": 0.6594911813735962,
+   "nll_first64": 4.607419013977051,
+   "top1_first64": 0.40625,
+   "secs": 34.85574769973755
+  },
+  {
+   "set": "coding__algorithmic_thinking",
+   "doc": 1643,
+   "n": 512,
+   "nll": 0.5596659183502197,
+   "top1": 0.8532289862632751,
+   "nll_first64": 1.2629674673080444,
+   "top1_first64": 0.796875,
+   "secs": 32.99374008178711
+  },
+  {
+   "set": "coding__algorithmic_thinking",
+   "doc": 9380,
+   "n": 512,
+   "nll": 0.5239713191986084,
+   "top1": 0.8551859259605408,
+   "nll_first64": 0.9469243884086609,
+   "top1_first64": 0.78125,
+   "secs": 35.116771936416626
+  },
+  {
+   "set": "coding__algorithmic_thinking",
+   "doc": 10813,
+   "n": 512,
+   "nll": 0.3487931489944458,
+   "top1": 0.9138942956924438,
+   "nll_first64": 0.7179946303367615,
+   "top1_first64": 0.890625,
+   "secs": 37.232468605041504
+  },
+  {
+   "set": "reasoning__counterargument_construction",
+   "doc": 3114,
+   "n": 512,
+   "nll": 2.771925449371338,
+   "top1": 0.6086105704307556,
+   "nll_first64": 5.438143730163574,
+   "top1_first64": 0.4375,
+   "secs": 34.7935905456543
+  },
+  {
+   "set": "reasoning__counterargument_construction",
+   "doc": 4825,
+   "n": 512,
+   "nll": 3.1068384647369385,
+   "top1": 0.5675146579742432,
+   "nll_first64": 5.212512016296387,
+   "top1_first64": 0.5625,
+   "secs": 34.29743957519531
+  },
+  {
+   "set": "reasoning__counterargument_construction",
+   "doc": 9904,
+   "n": 512,
+   "nll": 2.4319565296173096,
+   "top1": 0.6242661476135254,
+   "nll_first64": 4.682474613189697,
+   "top1_first64": 0.34375,
+   "secs": 40.80978322029114
+  },
+  {
+   "set": "speaking__executive_communication",
+   "doc": 4664,
+   "n": 512,
+   "nll": 0.8292786478996277,
+   "top1": 0.7984344363212585,
+   "nll_first64": 1.7108609676361084,
+   "top1_first64": 0.65625,
+   "secs": 35.62143588066101
+  },
+  {
+   "set": "speaking__executive_communication",
+   "doc": 6265,
+   "n": 512,
+   "nll": 0.6094529032707214,
+   "top1": 0.816046953201294,
+   "nll_first64": 0.7903097867965698,
+   "top1_first64": 0.84375,
+   "secs": 35.86904788017273
+  },
+  {
+   "set": "speaking__executive_communication",
+   "doc": 7338,
+   "n": 512,
+   "nll": 0.6686534881591797,
+   "top1": 0.835616409778595,
+   "nll_first64": 2.32053279876709,
+   "top1_first64": 0.546875,
+   "secs": 33.576483964920044
+  },
+  {
+   "set": "plain_english",
+   "n": 382,
+   "nll": 10.838024139404297,
+   "top1": 0.1784776896238327,
+   "nll_first64": 8.211875915527344,
+   "top1_first64": 0.21875
+  },
+  {
+   "set": "plain_english_2",
+   "n": 316,
+   "nll": 9.520798683166504,
+   "top1": 0.15238095819950104,
+   "nll_first64": 10.117713928222656,
+   "top1_first64": 0.203125
+  }
+ ]
+}
