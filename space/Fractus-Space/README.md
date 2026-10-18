@@ -26,6 +26,6 @@ Fixed on 2026-10-18 (see `docs/DEEP_DIVE_GENERATION.md` in GitHub `AFKmoney/frac
 - strict load, exactly like the trainer resume (no second Kuramoto routing fix);
 - open prompt encoding (no `<B6><EOS>` after the prompt);
 - fixed 128-id chunk grid, committed carry, open chunk re-forwarded each step (no double counting);
-- warm start: the tail of a real corpus document before BOS, as BOS appears in training;
+- warm start: the tail of a real corpus document before BOS, as BOS appears in training; default 127 ids (best in the 2026-10-18 hunt: CONT unique@40 19.0, exact 4.3/40 vs 2.3 at 64)
 - generation stops only at EOS or max new ids;
 - optional final norm before the tied head (off by default).
