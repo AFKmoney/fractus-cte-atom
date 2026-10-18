@@ -15,7 +15,14 @@ from fractus.atom_tokenizer import VOCAB_SIZE,AtomFractusTokenizer
 from fractus.continuous_engine import ContinuousThoughtEngine
 torch.set_num_threads(int(os.environ.get('THREADS','6')))
 CK=os.environ.get('CKPT','/workspace/ckpt_new/checkpoints/atom_latest/fractus_atom_1b_gpu0.bin')
-ck=torch.load(CK,map_location='cpu',weights_only=False,mmap=True)
+def load_raw_bf16(d):   # dir from scripts/ckpt_to_bf16raw.py: file-backed copy-on-write memmap (evictable pages)
+    import numpy as np
+    ix=json.load(open(os.path.join(d,'index.json'))); mm=np.memmap(os.path.join(d,'weights.bf16'),dtype=np.uint8,mode='c'); sd={}
+    for k,m in ix['tensors'].items():
+        a=mm[m['off']:m['off']+m['nbytes']]
+        sd[k]=(torch.from_numpy(a.view(np.int16)).view(torch.bfloat16) if m['dtype']=='bfloat16' else torch.from_numpy(a).view(getattr(torch,m['dtype']))).view(m['shape'])
+    return {'config':ix['config'],'model_state':sd}
+ck=load_raw_bf16(CK) if os.path.isdir(CK) else torch.load(CK,map_location='cpu',weights_only=False,mmap=True)
 cfg=ck['config']; sd=ck['model_state']
 keys=['d_model','n_heads','d_head','n_levels','n_oscillators','coupling_rank','n_experts','top_k','expert_d_ff','siren_rank','n_layers']
 with torch.device('meta'): eng=ContinuousThoughtEngine(vocab_size=VOCAB_SIZE,**{k:cfg[k] for k in keys})
@@ -106,4 +113,4 @@ if __name__=='__main__':
             torch.manual_seed(0); t=time.time(); out,tf=gen(p,mode,C,T,k,rp,N,state); dt=time.time()-t
             last=out[-40:]
             print(json.dumps({'cfg':c,'prompt':p,'output':tok.decode(out),'ids':out,'ids_s':round(N/dt,2),
-              'unique40':round(len(set(last))/len(last),3),'prompt_tf':tf,'rss_gb':round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6,2)},ensure_ascii=False),flush=True)
+              'unique40':round(len(set(last))/len(last),3),'unique40_count':len(set(last)),'n_last':len(last),'secs':round(dt,1),'prompt_tf':tf,'rss_gb':round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e6,2)},ensure_ascii=False),flush=True)

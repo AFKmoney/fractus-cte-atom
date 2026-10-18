@@ -160,3 +160,22 @@ Verbatim (Mode B T0.8 primer + 20% inference SS):
 Verdict: none of the carry fixes or inference SS makes this checkpoint generate coherent text. The carry is not inflated relative to TF. In Mode B it is identical to TF, so the remaining failure comes from the model's own next-id predictions on its sampled inputs and on out-of-corpus prompts, not from the inference driving.
 
 Trainer check (scripts/fast4gpu_atom.py): `SS_RATE` exists, default 1.0 (`SS_PROB_START` 0.2 -> `SS_PROB_END` 0.5 over `SS_RAMP_TOKENS` 5e7). The current run logs an SS pass on only some steps (`ss=`/`ema_ss` ~1.17 present on a subset of log lines; SS takes ~17% of wall time), so the run's effective SS_RATE is <1.0. Per-lane carry reset at BOS already exists (`reset_rows` on any chunk containing 257, applied to thought_state, attn_S, attn_z, kuramoto_phases).
+
+## v2 step_00035000 generation test (2026-10-17)
+Checkpoint: pod `/workspace/ckpt_v2/step_00035000/fractus_atom_1b_gpu0.pt` (was `good/` at copy time; GOOD.json: 4,482,621,440 ids, ema_tf 0.848), weights only, md5 `b05767a51e48ec12ac303c7e8b97472e` (pod = box). Training on the pod was not touched (read-only scp, no GPU use). CPU, bf16: the fp32 file was streamed into a raw bf16 blob (`scripts/ckpt_to_bf16raw.py`) and memory-mapped by `scripts/gen_block.py` (dir CKPT), peak RSS 2.66 GB. Protocol: BOS (257) + `encode_open(prompt)` (same ids as the corpus encoder), 40 greedy ids, carry (thought_state, attn_S, attn_z, kuramoto_phases) warm across blocks, reset only on chunks containing BOS. Raw: `/workspace/gen_v2_35000.jsonl`.
+
+| config | France | Once upon a time | Hello | mean unique@40 | prompt TF (B) |
+|---|---|---|---|---|---|
+| **A:128 greedy cold (primary)** | 14/40 (0.35) | 16/40 (0.40) | 15/40 (0.375) | **15.0/40 (0.375)** | n/a (harness logs TF only for prompts > C) |
+| B:128 greedy cold | 14/40 (0.35) | 16/40 (0.40) | 16/40 (0.40) | 15.3/40 (0.383) | 71.5 / 119.0 / 170.0 |
+| A:32 greedy cold | 14/40 (0.35) | 18/40 (0.45) | 18/40 (0.45) | 16.7/40 (0.417) | n/a |
+
+Verbatim (repr; `<B1>` = id 259 whitespace boundary marker, dropped by `tok.decode`):
+- A:128 France: `'tng toract <B1>omion aiomion fe <B1>optio iomi'`
+- A:128 Once: `'ng a bo ritealin <B1>pliacation . meaoor <B1>c'`
+- A:128 Hello: `'ds -pearasonctrssomestract orsc. Iomats '`
+- B:128 France: `'tng from a te<B1>byingengroo <B1>tiomiomion mi'`
+- B:128 Once: `'ng a bo ractstion <B1>splection scepome ars'`
+- B:128 Hello: `'ds -peaorallion lreaal ceasse, oerst <B1>ao'`
+
+Notes: with C=128 and short prompts every window still holds the BOS, so A and B both recompute from a reset carry at each step and give nearly the same output; only A:32 actually carries state across block boundaries. ~2.2-4.1 ids/s; the whole run (9 generations) took 1m59s. Findings: v2 step_35000 makes real-looking English fragments ("from a", "a bo", "-pear", "ceasse,") but no coherent continuation, and unique@40 (0.35-0.45) is in the same range as the v1 step_770000 cold/greedy runs (gb4 B:128 cold 0.30-0.425). Prompt TF from BOS is still very high (71-170 nats/id).

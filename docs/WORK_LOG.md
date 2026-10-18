@@ -86,3 +86,9 @@ Checkpoint `atom_latest` step_00770000 (2.455B ids, ema_tf 0.484), CPU. Full tab
 ## Costs and credit
 - Vast credit: $9.61 at 13:14 ET, $8.31 at 15:41 ET, $7.28 at 17:40 ET on Oct 17. At $0.525/h that is about 14 h.
 - One v2 pass at ~11.3k ids/s is ~4.5 days, about $57 + storage. **The credit must be topped up** before then, or the run stops as it did on Oct 15.
+
+## Oct 17: v2 generation tests
+
+| Decision | Why | Effect |
+|---|---|---|
+| Generation test on v2 step_00035000 (19:45 ET; 4,482,621,440 ids, ema_tf 0.848, ss_p ~0.77). Weights only, scp read-only from the pod (md5 match), CPU bf16 via `scripts/ckpt_to_bf16raw.py` + memmap in `scripts/gen_block.py`; BOS + `encode_open`, 40 greedy ids, carry warm across blocks, reset only at BOS | Check whether stronger SS (ss_p 0.5 to 0.85) changes free-running output | unique@40 (France / Once upon a time / Hello): **A:128 14/16/15, mean 15.0/40 (0.375)**; B:128 14/16/16, mean 15.3/40; A:32 14/18/18, mean 16.7/40. Prompt TF from BOS (B) 71.5 / 119.0 / 170.0 nats/id. Word-like fragments ("from a", "a bo"), not coherent; same range as v1 step_770000 (0.30-0.425). 1m59s for 9 runs. Raw: `/workspace/gen_v2_35000.jsonl`, details in GENERATION_SURGERY.md. |
