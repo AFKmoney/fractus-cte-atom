@@ -124,6 +124,12 @@ Each rung changes only `SS_RATE` in `run_v2.py` (backups `run_v2.py.bak_ss035_20
 | rung | relaunch (ET) | resume ckpt (ids) | start_token / lr_step_offset / steps_left | ids/s before -> after | SS share | ema_tf after | test result |
 |---|---|---|---|---|---|---|---|
 | 0.50 | Oct 17 21:07 | 0.35-run step_10000 (4,544,061,440) | 284,003,840 / 65,000 / 2,088,780 | 10,640 -> 9,750 | 23% -> 30% | 1.35-1.76 | step_5000 (4,554,301,440): A:128 14.7/40, CONT B:512 unique 16.3/40, exact 4.3/40, cont TF 1.78 nats/id mean |
-| 0.75 | Oct 17 21:44 | 0.50-run step_10000 (4,564,541,440) | 285,283,840 / 75,000 / 2,078,780 | 9,720 -> 8,330 | 30% -> 39% | 1.8-2.5 (first 800 steps) | pending |
+| 0.75 | Oct 17 21:44 | 0.50-run step_10000 (4,564,541,440) | 285,283,840 / 75,000 / 2,078,780 | 9,720 -> 8,330 | 30% -> 39% | 1.8-2.45 (1,000 steps, 8,312-8,412 ids/s, 2 skips) | stopped, see below |
 
 0 non-finite gradients after either relaunch.
+
+## 2026-10-18: v2 rollback to HF step_00005000, SS_RATE 0.35
+- **Why.** The ladder made TF worse without better free-running output. At 0.50: CONT B:512 unique@40 16.3/40 (0.35 baseline 19.0), exact 4.3/40 (5.7), continuation TF ~1.8 nats/id (~0.9), top-1 0.55 (0.71); short prompts A:128 14.7/40. At 0.75: ema_tf 1.8-2.45 at 8,336 ids/s. The user stopped the ladder and chose to restart from the last HF good checkpoint at SS_RATE 0.35 and not raise SS further.
+- **Resume point.** HF `checkpoints/atom_v2/` = first v2 run step_00005000 (SS_RATE 0.25): 4,421,181,440 ids, ema_tf 1.127, start_token_next 276,323,840. Weights + optimizer downloaded to `/workspace/ckpt_v2_from_hf5000/` (renamed `.bin`/`.opt.bin` to `.pt`/`.opt`). All ladder checkpoints (0.35/0.50/0.75) deleted from the pod.
+- **Config.** Original T4 config, only `SS_RATE=0.35`: `CARRY_DECAY=1.0 SS_PROB_START=0.5 SS_PROB_END=0.85 SS_RAMP_TOKENS=100000000 SS_RAMP_ORIGIN_IDS=4410941440 EPOCH_WRAP=1`, AdamW LR 2.5e-5 cosine to 2.5e-6, warmup 500, `LR_TOTAL_STEPS=2153780`, `LR_STEP_OFFSET=5000`, `MAX_STEPS=2148780`, `START_TOKEN=276323840`, guards and rollback unchanged.
+- **Launch.** Oct 18 01:56:57 UTC (21:56:57 ET Oct 17). Optimizer loaded, ids from 4,421,181,440, ss_p 0.537 (ramps back to 0.85 by 4,510,941,440 ids), lr 2.5e-5 from step 600, ~10,200-10,370 ids/s, SS 25% of wall time, ema_tf 2.12 / 1.31 / 1.15 / 1.71 at steps 200/400/600/800, 2 skips (SS GN spikes) by step 890, 0 non-finite.
