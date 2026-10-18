@@ -146,3 +146,17 @@ Each rung changes only `SS_RATE` in `run_v2.py` (backups `run_v2.py.bak_ss035_20
 - **Validation.** 400-step scratch run: 0 skips, 0 non-finite, ema_tf 0.649, tf 0.50-0.76, ss 0.72, ss_tail 1.84-2.16 (v2 ss was 2.0-3.0 with the whole chunk mixed), 10,652 ids/s wall, mem_peak 29.2 GB, save path OK.
 - **Launch.** v2 trainer/runner/pusher stopped 09:14:27Z (05:14 ET) at ~4,669.8M ids (v2 good/ = step_75000, 4,666,941,440 ids, kept). v3 launched 09:16:38Z (05:16:38 ET). First wall lines: 4,636,631,040 ids at 10,392 ids/s, then 10,510 / 10,481; ema_tf 0.66-0.69 after warmup, 0 skips, 0 non-finite.
 - **Retest after +20.48M ids (v3 step_10000, 4,656,701,440 ids).** CONT B:512 unique@40 16/20/18 (mean 18.0, step_60000: 16.3), exact position 2/4/1 (mean 2.3, was 5.7), cont TF C512 0.50 nats/id (was 0.82), top-1 0.85 (was 0.76). B:128 unique 19.3 / exact 4.3, A:128 16.7 / 3.0. The CPU harness varies by ~2 ids between runs on the same weights (see WORK_LOG), so the unique gain is small and the exact-position drop is real but noisy. ema_tf 0.55-0.64, 10 GN-spike skips, 0 non-finite.
+
+## 2026-10-18: corpus v4 (real language) built, trainer v4 prepared (not launched)
+- **Why.** The v1-v3 corpus is 99.83% templates with only 243,575 distinct 16-grams in 4.41B ids (`docs/CORPUS_TEMPLATE_AUDIT.md`). The user approved real language datasets.
+- **Corpus.** `atom_corpus_v4` holds 1,400,295,456 train ids in 7 shards plus a 5,598,840-id val shard, with identical Atom encoding (linguistic, max span 32, BOS ... EOS per doc, raw int16).
+  - Mix: FineWeb-Edu 50.0%, Wikipedia 17.9%, TinyStoriesV2 14.3%, PG-19 10.7%, old corpus 7.2%, shuffled at doc level.
+  - Distinct 16-grams per 100M ids: 75.4M vs 182k for the old corpus.
+  - On the pod at `/workspace/atom_corpus_v4/`, on HF at `atom_corpus_v4/`. Details in `docs/CORPUS_V4.md`.
+- **Trainer v4.** `scripts/fast4gpu_atom_v4.py` (v3 + multi-shard corpus dir, `CORPUS_SWITCH`, `IDS_BASE`, periodic held-out VAL loss) and `scripts/run_v4.py`.
+  - Resumes weights and AdamW state from the v3 good/ checkpoint at the moment of launch. At build time that was step_00245000 of the v3 segment, 5,137,981,440 ids.
+  - Starts at lane offset 0 of v4. B=16, SEQ=128, SS_RATE 0.35, SS_TAIL_IDS 8, ss_p 0.85.
+  - LR 2.35e-5 cosine to 2.5e-6, warmup 500. VAL every 2,500 steps.
+  - The guards are relaxed for the switch, because v3 scores 19.8-24.7 nats/id on real text (CPU check).
+  - Installed on the pod, not launched. v3 keeps running.
+- **Budget.** A full pass takes 36.7 h / $19.27 at 10.6k ids/s and $0.525/h. Credit was $18.08 at 19:34 ET, so the run should be launched with `PLAN_IDS` ~1.1B (28.8 h, $15.13).
