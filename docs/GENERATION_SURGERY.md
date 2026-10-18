@@ -179,3 +179,14 @@ Verbatim (repr; `<B1>` = id 259 whitespace boundary marker, dropped by `tok.deco
 - B:128 Hello: `'ds -peaorallion lreaal ceasse, oerst <B1>ao'`
 
 Notes: with C=128 and short prompts every window still holds the BOS, so A and B both recompute from a reset carry at each step and give nearly the same output; only A:32 actually carries state across block boundaries. ~2.2-4.1 ids/s; the whole run (9 generations) took 1m59s. Findings: v2 step_35000 makes real-looking English fragments ("from a", "a bo", "-pear", "ceasse,") but no coherent continuation, and unique@40 (0.35-0.45) is in the same range as the v1 step_770000 cold/greedy runs (gb4 B:128 cold 0.30-0.425). Prompt TF from BOS is still very high (71-170 nats/id).
+
+## v2 at ss_p 0.85 (step_00050000) and after SS_RATE 0.35 (new-run step_00005000), 2026-10-17/18
+Same protocol as above (CPU bf16 memmap, BOS + `encode_open`, 40 greedy ids, carry warm, reset only at BOS). unique@40 (France / Once upon a time / Hello):
+
+| ckpt | ids | A:128 (primary) | A:32 | B:128 | prompt TF (B) |
+|---|---|---|---|---|---|
+| step_00035000, SS 0.25, ss_p ~0.77 | 4,482,621,440 | 14/16/15 = 15.0/40 | 14/18/18 = 16.7 | 14/16/16 = 15.3 | 71.5 / 119.0 / 170.0 |
+| step_00050000, SS 0.25, ss_p 0.85 | 4,513,341,440 | 18/17/14 = 16.3/40 | 16/13/19 = 16.0 | 16/15/16 = 15.7 | 46.8 / 121.5 / 128.0 |
+| step_00005000 after SS_RATE 0.35 (10.2M ids at 0.35) | 4,533,821,440 | 12/15/15 = 14.0/40 | 18/14/15 = 15.7 | 13/15/16 = 14.7 | 48.8 / 102.5 / 141.0 |
+
+Verbatim A:128 (repr, `<Bk>` = boundary ids 258+k): step_50000 France `'tning me, akenwedalle <B1>wovans pa and pan'`, Once `',bawd a afa\n<B3>FmawFakeved <B3>h Fvwaweuaeeld'`, Hello `'unt traml ral ma mdsnanwiuld ss abdss a<B1>'`. After SS 0.35: France `'ong fa bingen ngen en enendeerengeengnte'`, Once `'onimion uecueti <B1>amdely y utati <B1>achalya'`, Hello `'dyingoou <B1>yyioyhminn ng aloou <B1>  clou as'`. Raw: `/workspace/gen_v2_50000.jsonl`, `/workspace/gen_v2_ss035_5000.jsonl`; `scripts/annotate_gen.py` adds the repr renders. No checkpoint reaches 20/40; differences are within run-to-run noise.

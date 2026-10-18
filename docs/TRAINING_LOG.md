@@ -111,3 +111,9 @@ tf = teacher-forced loss. SGD tf ≈ 3.2-3.3 regardless of LR.
 
   SS on every step damages TF even at LR 1e-5 (T1, T3). LR 1e-4 also degrades TF on its own (T2). Carry decay 0.97 is not the main factor. 0 non-finite gradients in all tests.
 - **Launched run (Oct 17 21:45 UTC) = T4 config.** `CARRY_DECAY=1.0 SS_RATE=0.25 SS_PROB_START=0.5 SS_PROB_END=0.85 SS_RAMP_TOKENS=100000000 SS_RAMP_ORIGIN_IDS=4410941440 EPOCH_WRAP=1`, AdamW LR 2.5e-5 cosine to 2.5e-6, warmup 500, `LR_TOTAL_STEPS=MAX_STEPS=2153780` (one pass), weights and optimizer from `ckpt_full/good/` (step_00940158), `START_TOKEN=275683840`, guards and rollback unchanged, `OUT_DIR=/workspace/ckpt_v2`.
+
+## 2026-10-18: v2 SS_RATE 0.25 -> 0.35
+- **Why.** Generation tests at ss_p 0.85 (step_00050000, 4,513,341,440 ids): greedy unique@40 mean 16.3/40 (A:128), below the user's 20/40 threshold. Rule: SS on 10% more of the steps.
+- **Change.** Only `SS_RATE` in `run_v2.py` BASE env (0.25 -> 0.35). Unchanged: `SS_PROB_START=0.5 SS_PROB_END=0.85 SS_RAMP_TOKENS=100000000 SS_RAMP_ORIGIN_IDS=4410941440` (so ss_p stays 0.85), `CARRY_DECAY=1.0`, `EPOCH_WRAP=1`, LR 2.5e-5 cosine to 2.5e-6 over `LR_TOTAL_STEPS=2153780`, warmup 500, guards.
+- **Resume.** Oct 18 00:33 UTC (20:33 ET) from step_00055000 (4,523,581,440 ids, ema_tf 0.901), weights + optimizer from `/workspace/ckpt_v2_pre_ss035/step_00055000/`, `START_TOKEN=282723840`, `MAX_STEPS=2098780`, `LR_STEP_OFFSET=55000`. Old step dirs moved out of `ckpt_v2/` because the step counter restarts at 0 and step dirs are rotated by name.
+- **Effect (first 20 min).** 0 non-finite; lr back at 2.496e-5 after the 500-step warmup; ss_p 0.850; 10,700 ids/s (11,376 before), SS 22-23% of wall time (17% before); ema_tf 0.98-1.39 (0.84-1.05 before); 31 skipped steps in ~6,800 steps. First good ckpt: new step_00005000, 4,533,821,440 ids, ema_tf 1.115. Gen retest: A:128 unique@40 mean 14.0/40 (no change yet).
