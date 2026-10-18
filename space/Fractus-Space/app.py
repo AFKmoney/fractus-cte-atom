@@ -68,7 +68,7 @@ def infer(prompt, max_new, warm, temperature, top_k, final_norm, decoder="greedy
             else:
                 out = GEN.generate(ctx, max_new=int(max_new), temperature=float(temperature), top_k=int(top_k))
             txt = GEN.tok.decode(out)
-            return "%s\n\n---\nwith markers: %s\nunique ids=%d/%d | warm=%d | T=%.2f top_k=%d | final_norm=%s | %.1fs" % (
+            return "%s\n\n---\nwith markers: %s\nunique ids=%d/%d | warm=%d | T=%.2f top_k=%d | final_norm=%s | decoder=%s | template=%s | %.1fs" % (
                 txt if txt.strip() else "(only markers/whitespace)", show(out), len(set(out)), len(out), w,
                 float(temperature), int(top_k), final_norm, decoder, bool(template), time.time() - t)
         except Exception as e:  # noqa: BLE001
