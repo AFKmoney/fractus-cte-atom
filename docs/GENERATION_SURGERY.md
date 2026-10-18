@@ -190,3 +190,29 @@ Same protocol as above (CPU bf16 memmap, BOS + `encode_open`, 40 greedy ids, car
 | step_00005000 after SS_RATE 0.35 (10.2M ids at 0.35) | 4,533,821,440 | 12/15/15 = 14.0/40 | 18/14/15 = 15.7 | 13/15/16 = 14.7 | 48.8 / 102.5 / 141.0 |
 
 Verbatim A:128 (repr, `<Bk>` = boundary ids 258+k): step_50000 France `'tning me, akenwedalle <B1>wovans pa and pan'`, Once `',bawd a afa\n<B3>FmawFakeved <B3>h Fvwaweuaeeld'`, Hello `'unt traml ral ma mdsnanwiuld ss abdss a<B1>'`. After SS 0.35: France `'ong fa bingen ngen en enendeerengeengnte'`, Once `'onimion uecueti <B1>amdely y utati <B1>achalya'`, Hello `'dyingoou <B1>yyioyhminn ng aloou <B1>  clou as'`. Raw: `/workspace/gen_v2_50000.jsonl`, `/workspace/gen_v2_ss035_5000.jsonl`; `scripts/annotate_gen.py` adds the repr renders. No checkpoint reaches 20/40; differences are within run-to-run noise.
+
+## CONT mode on reasoning__syllogisms (v2 new-run step_00005000, SS_RATE 0.35), 2026-10-17
+What `<CONT>` is: there is no `<CONT>` token in the tokenizer (vocab 266: 0-255 bytes, 256, 257 BOS, 258 EOS, 259-265 boundary markers) and none in the corpus builder. `<CONT>` exists only as a prompt keyword in `scripts/gen_block.py`: with state `primer` it commits BOS + the first 255 ids of the first document of `reasoning__syllogisms.i16`, then feeds the next `CONT_TAIL` ids as the prompt and generates (continue an in-corpus document). This test uses the same idea with a cleaner split and a known reference: `scripts/gen_cont_syllog.py`.
+
+Protocol: CPU bf16 memmap of `ckpt_v2_test/bf16raw` (4,533,821,440 ids). Primer = BOS + first 256 ids of the document, exactly as in the corpus (257 ids). Reference = the true next 40 ids. 40 greedy ids (ids 256 and 257 masked as in `gen_block.pick`), cold carry, reset only at BOS. B:512 = the whole primer plus the generated ids fit in one window (regenerated every step, nothing committed). B:128 = the harness slides: it commits 128 + 65 ids and keeps 64-128 pending. A:128 = the harness block tick. TF loss = teacher-forced CE in nats/id: from BOS, chunks of 128 (training layout) or one chunk of 512. Primer = the 256 predictions inside the primer, cont = the 40 true next ids. Docs: index 0 (offset 0), 5000 (offset 17,969,928), 10000 (offset 35,956,871). Each is about 3.5k ids, all from the same template.
+
+| doc | primer TF C128 / C512 | cont TF C128 / C512 | top-1 TF acc cont (C512) | B:512 uniq / exact (prefix) | B:128 | A:128 | true uniq |
+|---|---|---|---|---|---|---|---|
+| 0 | 4.82 / 4.71 | 1.23 / 0.94 | 0.60 | 17 / 6 (1) | 16 / 2 (1) | 18 / 2 (1) | 21 |
+| 5000 | 2.82 / 2.86 | 1.03 / 0.99 | 0.80 | 19 / 6 (6) | 17 / 6 (6) | 14 / 3 (0) | 20 |
+| 10000 | 5.76 / 5.40 | 1.82 / 0.71 | 0.725 | 21 / 5 (3) | 19 / 2 (0) | 17 / 1 (0) | 18 |
+| mean | 4.47 / 4.32 | 1.36 / 0.88 | 0.71 | **19.0 / 5.7** | 17.3 / 3.3 | 16.3 / 2.0 | 19.7 |
+
+Verbatim (repr, `<Bk>` = id 258+k):
+- doc 0. Tail `'... from a theoretical foundations angle, formatted as a'`, true `' step-<B2>by-step procedure, written <B1>for a'`. B:512 `' pl<B2><B2>2---ahepndindiciiirirse aten n wrii'`, B:128 `' <B2><B2><B2>]iorhrin is ne a hindicnersce <EOS>tfone'`, A:128 `' eex   a rnon oniniuauTiniv;phu\x94 iuu/.ut'`
+- doc 5000. Tail `'... from a theoretical fou'`, true `'ndations <B1>angle, formatted as a Q&<B2>A dia'`. B:512 `'ndatio<B2><B2>le,<B2>formatted as jedgle.<B2>Etenfor'`, B:128 `'ndatio<B2><B2>le.<B2>** fressthen ate woretistre<B2>'`, A:128 `'tierifuistingusilyyyauuiualuivefpnyuatai'`
+- doc 10000. Tail `'... from a the'`, true `'oretical foundations <B1>angle, formatted a'`. B:512 `'oresiol/workpl-<B2><B2><B3><B3>*Enindens,<B3>1annd**Eng'`, B:128 `'resiool/work-<B2>wele<B2>fnan-<B2>Es, Han f-s and'`, A:128 `',ativeeduuke iu\x94\x97ioioioioioioinduingux'`
+
+Findings:
+1. Teacher-forced, the model knows the continuation well: about 0.9 nats/id and 60-80% top-1 on the true next 40 ids. Free-running, it holds the right track for 1-6 ids and then derails. Unique@40 (B:512 19.0, close to the true text's 19.7) is not a quality signal here. The outputs are not plausible continuations, beyond the first word piece in docs 5000 and 10000 ("ndatio...le, formatted as").
+2. Mode B with the whole primer in one window (B:512) is best: 5.7/40 exact matches, against 3.3 for B:128 and 2.0 for A:128. A:128 is worst because it re-ticks overlapping windows into the carry.
+3. Primer TF is dominated by a few huge confidently wrong ids, not by an even spread. The position right after BOS costs 116-128 nats, the template slots (audience, angle) cost 20-100 nats, and the first 32 positions average 6-25 nats/id. Positions 160-256 average 0.6-2 nats/id. That is why the earlier "prompt TF 48-170 nats/id" numbers looked impossible: the logits are very large (overconfident).
+4. Chunk-start artifact. With C=128 chunking, position 0 of each chunk is bad: 8-14 nats at offsets 128 and 256, against ~1 nearby. Doc 0's first continuation id (" ") costs 12.0 nats with C128 TF, but B:512 and B:128 both predict it correctly greedily, because there it is not at a chunk start.
+5. bf16 CPU TF numbers drift between two identical runs, e.g. doc 5000 cont C128 1.03 vs 1.21, from thread reduction order on huge logits. Treat differences under ~0.2 nats as noise.
+
+Runtime: 3 docs x 3 configs + TF = 6.8 min (B:512 ~80 s per run, 0.5 ids/s; B:128 ~17 s; A:128 ~27 s). Raw: `/workspace/gen_cont_syllog.jsonl` (`tf_repeat` rows hold the per-position primer NLL).
