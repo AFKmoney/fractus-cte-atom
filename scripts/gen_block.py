@@ -7,6 +7,10 @@ Modes:
                      committed carry and re-runs the whole pending block (C/2..C ids),
                      takes the next id from the last position. When the pending block
                      reaches C ids, its first C/2 ids are committed (carry advanced).
+  2026-10-18 fix (docs/DEEP_DIVE_GENERATION.md): mode A used to call tick(ctx[-C:]) on the committed
+  carry every step, adding the same ids to attn_S/attn_z again on each step (teacher-forced through it:
+  top-1 0.20-0.25 vs 0.85). Mode A is now a pure sliding window from zero carry (A_LEGACY=1 = old).
+  For the training function (fixed grid + committed carry + warm start) use scripts/gen_fixed.py.
 Usage: CKPT=... CONFIGS=... python3 scripts/gen_block.py > out.jsonl
 """
 import sys,os,time,json,gc,resource,torch,torch.nn.functional as F
@@ -28,6 +32,7 @@ keys=['d_model','n_heads','d_head','n_levels','n_oscillators','coupling_rank','n
 with torch.device('meta'): eng=ContinuousThoughtEngine(vocab_size=VOCAB_SIZE,**{k:cfg[k] for k in keys})
 msd=eng.state_dict(); bad=[k for k in sd if sd[k].shape!=msd[k].shape]   # batch-sized stream-state keys
 LANE=int(os.environ.get('LANE','0'))
+A_LEGACY=os.environ.get('A_LEGACY','0')=='1'
 saved={k:sd[k][LANE:LANE+1].float().clone() for k in bad}
 for k in bad: sd[k]=torch.zeros(msd[k].shape)
 DT=getattr(torch,os.environ.get('DTYPE','float32'))
@@ -101,7 +106,9 @@ def gen(prompt,mode,C,T,k,rp,N,state):
             pend,tf=prime(ids,C,0); tf=tf  # prompt fully committed except tail
             ctx=list(hist)
             for _ in range(N):
-                lg=tick(ctx[-C:])[-1]
+                if A_LEGACY: lg=tick(ctx[-C:])[-1]   # old: re-adds the window to the committed carry every step (double counting)
+                else:                                  # fixed: pure sliding window, zero carry, nothing committed
+                    s=get(); cold(); lg=eng.tick_chunk(torch.tensor([ctx[-C:]]))[0][-1]; put(s)
                 n=pick(lg,hist,T,k,rp); out.append(n); hist.append(n); ctx.append(n)
     return out,tf
 PROMPTS=os.environ['PROMPTS'].split('|') if os.environ.get('PROMPTS') else ["Bonjour, je m'appelle","The capital of France is","Q: What is 2+2?\nA:","Il était une fois"]

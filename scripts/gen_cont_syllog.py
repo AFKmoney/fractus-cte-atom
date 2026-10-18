@@ -39,8 +39,9 @@ def gen(ids,mode,C,N=NC):
                 if len(pend)>=C: G.tick(pend[:C//2]); pend=pend[C//2:]
         else:
             pend,tf=G.prime(ids,C,0); ctx=list(hist)
-            for _ in range(N):
-                lg=G.tick(ctx[-C:])[-1]
+            for _ in range(N):   # 2026-10-18: pure sliding window (old code re-added the window to the carry each step)
+                if G.A_LEGACY: lg=G.tick(ctx[-C:])[-1]
+                else: s=G.get(); G.cold(); lg=G.eng.tick_chunk(torch.tensor([ctx[-C:]]))[0][-1]; G.put(s)
                 n=G.pick(lg,hist,0.0,1,1.0); out.append(n); hist.append(n); ctx.append(n)
     return out,tf
 T0=time.time()
