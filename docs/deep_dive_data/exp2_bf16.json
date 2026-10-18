@@ -1,0 +1,563 @@
+{
+ "0": {
+  "true": " step-<B2>by-step procedure, written <B1>for a",
+  "bos_pos": 111,
+  "tf_train_cold_C128": {
+   "nll": 0.579,
+   "top1": 0.875,
+   "err_pos": [
+    1,
+    4,
+    6,
+    7,
+    14
+   ],
+   "argmax_at_err": "adaAr"
+  },
+  "tf_single_chunk_cold": {
+   "nll": 0.396,
+   "top1": 0.875,
+   "err_pos": [
+    1,
+    4,
+    6,
+    7,
+    14
+   ],
+   "argmax_at_err": "QdaAr"
+  },
+  "tf_train_exact_align": {
+   "nll": 0.62,
+   "top1": 0.825,
+   "err_pos": [
+    1,
+    2,
+    4,
+    6,
+    7,
+    17,
+    34
+   ],
+   "argmax_at_err": "Qcnbsyf"
+  },
+  "parity_B512_vs_single_chunk_cold": {
+   "maxabs": 31.0,
+   "median_maxabs": 8.0,
+   "top1_agree": 0.95
+  },
+  "parity_B512_vs_train_cold_C128": {
+   "maxabs": 103.25,
+   "median_maxabs": 11.0,
+   "top1_agree": 0.925
+  },
+  "tf_genpath_B512": {
+   "nll": 0.307,
+   "top1": 0.85
+  },
+  "parity_B128_vs_single_chunk_cold": {
+   "maxabs": 83.25,
+   "median_maxabs": 10.25,
+   "top1_agree": 0.925
+  },
+  "parity_B128_vs_train_cold_C128": {
+   "maxabs": 108.5,
+   "median_maxabs": 10.5,
+   "top1_agree": 0.9
+  },
+  "tf_genpath_B128": {
+   "nll": 0.399,
+   "top1": 0.875
+  },
+  "parity_A128_vs_single_chunk_cold": {
+   "maxabs": 149.0,
+   "median_maxabs": 65.25,
+   "top1_agree": 0.15
+  },
+  "parity_A128_vs_train_cold_C128": {
+   "maxabs": 153.75,
+   "median_maxabs": 65.5,
+   "top1_agree": 0.15
+  },
+  "tf_genpath_A128": {
+   "nll": 9.138,
+   "top1": 0.175
+  },
+  "greedy_train_cold": {
+   "exact_pos": 2,
+   "exact_prefix": 1,
+   "unique40": 16,
+   "seqmatch_ratio": 0.525,
+   "text": " a Qederiore, <B1>writtten for a prian appl",
+   "ids": [
+    32,
+    97,
+    32,
+    81,
+    101,
+    100,
+    101,
+    114,
+    105,
+    111,
+    114,
+    101,
+    44,
+    32,
+    259,
+    119,
+    114,
+    105,
+    116,
+    116,
+    116,
+    101,
+    110,
+    32,
+    102,
+    111,
+    114,
+    32,
+    97,
+    32,
+    112,
+    114,
+    105,
+    97,
+    110,
+    32,
+    97,
+    112,
+    112,
+    108
+   ]
+  },
+  "greedy_train_train_exact_align": {
+   "exact_pos": 6,
+   "exact_prefix": 1,
+   "unique40": 17,
+   "seqmatch_ratio": 0.225,
+   "text": " Qdefore/aftr <B1>trr transformation, wr st",
+   "ids": [
+    32,
+    81,
+    100,
+    101,
+    102,
+    111,
+    114,
+    101,
+    47,
+    97,
+    102,
+    116,
+    114,
+    32,
+    259,
+    116,
+    114,
+    114,
+    32,
+    116,
+    114,
+    97,
+    110,
+    115,
+    102,
+    111,
+    114,
+    109,
+    97,
+    116,
+    105,
+    111,
+    110,
+    44,
+    32,
+    119,
+    114,
+    32,
+    115,
+    116
+   ]
+  }
+ },
+ "5000": {
+  "true": "ndations <B1>angle, formatted as a Q&<B2>A dia",
+  "bos_pos": 119,
+  "tf_train_cold_C128": {
+   "nll": 0.938,
+   "top1": 0.775,
+   "err_pos": [
+    0,
+    1,
+    4,
+    5,
+    6,
+    7,
+    8,
+    34,
+    38
+   ],
+   "argmax_at_err": "k/ecu/eAe"
+  },
+  "tf_single_chunk_cold": {
+   "nll": 0.46,
+   "top1": 0.875,
+   "err_pos": [
+    1,
+    6,
+    7,
+    8,
+    38
+   ],
+   "argmax_at_err": "*upee"
+  },
+  "tf_train_exact_align": {
+   "nll": 1.186,
+   "top1": 0.8,
+   "err_pos": [
+    1,
+    4,
+    6,
+    7,
+    9,
+    32,
+    34,
+    38
+   ],
+   "argmax_at_err": "*eu*aaAe"
+  },
+  "parity_B512_vs_single_chunk_cold": {
+   "maxabs": 32.25,
+   "median_maxabs": 8.75,
+   "top1_agree": 0.875
+  },
+  "parity_B512_vs_train_cold_C128": {
+   "maxabs": 47.5,
+   "median_maxabs": 14.25,
+   "top1_agree": 0.825
+  },
+  "tf_genpath_B512": {
+   "nll": 0.735,
+   "top1": 0.8
+  },
+  "parity_B128_vs_single_chunk_cold": {
+   "maxabs": 22.062,
+   "median_maxabs": 10.0,
+   "top1_agree": 0.925
+  },
+  "parity_B128_vs_train_cold_C128": {
+   "maxabs": 49.625,
+   "median_maxabs": 13.25,
+   "top1_agree": 0.85
+  },
+  "tf_genpath_B128": {
+   "nll": 0.369,
+   "top1": 0.9
+  },
+  "parity_A128_vs_single_chunk_cold": {
+   "maxabs": 95.25,
+   "median_maxabs": 51.75,
+   "top1_agree": 0.275
+  },
+  "parity_A128_vs_train_cold_C128": {
+   "maxabs": 98.5,
+   "median_maxabs": 54.453,
+   "top1_agree": 0.225
+  },
+  "tf_genpath_A128": {
+   "nll": 5.926,
+   "top1": 0.3
+  },
+  "greedy_train_cold": {
+   "exact_pos": 3,
+   "exact_prefix": 1,
+   "unique40": 18,
+   "seqmatch_ratio": 0.625,
+   "text": "naticated apmeperongy <B1>angle, formatted ",
+   "ids": [
+    110,
+    97,
+    116,
+    105,
+    99,
+    97,
+    116,
+    101,
+    100,
+    32,
+    97,
+    112,
+    109,
+    101,
+    112,
+    101,
+    114,
+    111,
+    110,
+    103,
+    121,
+    32,
+    259,
+    97,
+    110,
+    103,
+    108,
+    101,
+    44,
+    32,
+    102,
+    111,
+    114,
+    109,
+    97,
+    116,
+    116,
+    101,
+    100,
+    32
+   ]
+  },
+  "greedy_train_train_exact_align": {
+   "exact_pos": 4,
+   "exact_prefix": 1,
+   "unique40": 19,
+   "seqmatch_ratio": 0.4,
+   "text": "n* <B1>an o-everatippmicaticationgle, forma",
+   "ids": [
+    110,
+    42,
+    32,
+    259,
+    97,
+    110,
+    32,
+    111,
+    45,
+    101,
+    118,
+    101,
+    114,
+    97,
+    116,
+    105,
+    112,
+    112,
+    109,
+    105,
+    99,
+    97,
+    116,
+    105,
+    99,
+    97,
+    116,
+    105,
+    111,
+    110,
+    103,
+    108,
+    101,
+    44,
+    32,
+    102,
+    111,
+    114,
+    109,
+    97
+   ]
+  }
+ },
+ "10000": {
+  "true": "oretical foundations <B1>angle, formatted a",
+  "bos_pos": 118,
+  "tf_train_cold_C128": {
+   "nll": 1.276,
+   "top1": 0.75,
+   "err_pos": [
+    0,
+    3,
+    4,
+    8,
+    9,
+    16,
+    18,
+    20,
+    35,
+    38
+   ],
+   "argmax_at_err": "rceaaereee"
+  },
+  "tf_single_chunk_cold": {
+   "nll": 0.629,
+   "top1": 0.75,
+   "err_pos": [
+    0,
+    3,
+    4,
+    7,
+    8,
+    9,
+    16,
+    18,
+    20,
+    35
+   ],
+   "argmax_at_err": "bncn-aeree"
+  },
+  "tf_train_exact_align": {
+   "nll": 1.045,
+   "top1": 0.825,
+   "err_pos": [
+    0,
+    2,
+    3,
+    9,
+    10,
+    18,
+    38
+   ],
+   "argmax_at_err": "aaadau-"
+  },
+  "parity_B512_vs_single_chunk_cold": {
+   "maxabs": 46.75,
+   "median_maxabs": 9.0,
+   "top1_agree": 0.825
+  },
+  "parity_B512_vs_train_cold_C128": {
+   "maxabs": 41.75,
+   "median_maxabs": 11.25,
+   "top1_agree": 0.8
+  },
+  "tf_genpath_B512": {
+   "nll": 0.825,
+   "top1": 0.85
+  },
+  "parity_B128_vs_single_chunk_cold": {
+   "maxabs": 24.5,
+   "median_maxabs": 10.0,
+   "top1_agree": 0.875
+  },
+  "parity_B128_vs_train_cold_C128": {
+   "maxabs": 46.0,
+   "median_maxabs": 9.5,
+   "top1_agree": 0.825
+  },
+  "tf_genpath_B128": {
+   "nll": 0.562,
+   "top1": 0.825
+  },
+  "parity_A128_vs_single_chunk_cold": {
+   "maxabs": 106.25,
+   "median_maxabs": 54.0,
+   "top1_agree": 0.125
+  },
+  "parity_A128_vs_train_cold_C128": {
+   "maxabs": 108.5,
+   "median_maxabs": 53.5,
+   "top1_agree": 0.125
+  },
+  "tf_genpath_A128": {
+   "nll": 5.783,
+   "top1": 0.15
+  },
+  "greedy_train_cold": {
+   "exact_pos": 1,
+   "exact_prefix": 0,
+   "unique40": 17,
+   "seqmatch_ratio": 0.575,
+   "text": "recan-angle, formatted as an-aforede/afo",
+   "ids": [
+    114,
+    101,
+    99,
+    97,
+    110,
+    45,
+    97,
+    110,
+    103,
+    108,
+    101,
+    44,
+    32,
+    102,
+    111,
+    114,
+    109,
+    97,
+    116,
+    116,
+    101,
+    100,
+    32,
+    97,
+    115,
+    32,
+    97,
+    110,
+    45,
+    97,
+    102,
+    111,
+    114,
+    101,
+    100,
+    101,
+    47,
+    97,
+    102,
+    111
+   ]
+  },
+  "greedy_train_train_exact_align": {
+   "exact_pos": 20,
+   "exact_prefix": 0,
+   "unique40": 19,
+   "seqmatch_ratio": 0.625,
+   "text": "a debugisitil/eceorst angle, formatted a",
+   "ids": [
+    97,
+    32,
+    100,
+    101,
+    98,
+    117,
+    103,
+    105,
+    115,
+    105,
+    116,
+    105,
+    108,
+    47,
+    101,
+    99,
+    101,
+    111,
+    114,
+    115,
+    116,
+    32,
+    97,
+    110,
+    103,
+    108,
+    101,
+    44,
+    32,
+    102,
+    111,
+    114,
+    109,
+    97,
+    116,
+    116,
+    101,
+    100,
+    32,
+    97
+   ]
+  }
+ }
+}
