@@ -11,6 +11,7 @@ Fixed on 2026-10-18 (docs/DEEP_DIVE_GENERATION.md in AFKmoney/fractus-cte-atom):
   * optional warm start: the tail of a real corpus document (... <B6><EOS>) before BOS, as in training;
   * generation does not stop at boundary markers, only at EOS or max new ids;
   * optional final norm before the tied head (off by default: the weights were trained without one).
+Added 2026-10-18 evening: decoder choice (greedy default, beam 4, min-p on raw logits) and a corpus-template prompt option.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ import torch
 import gradio as gr
 
 from fractus.fixed_generation import FixedGenerator, load_checkpoint, show
+from gen_best import Decoder, template_prompt
 
 torch.set_num_threads(max(1, os.cpu_count() or 2))
 CKPT_REPO = os.environ.get("CKPT_REPO", "thefinalboss/fractus-cte-atom")
@@ -29,22 +31,24 @@ CKPT_FILE = os.environ.get("CKPT_FILE", "checkpoints/atom_v3/fractus_atom_1b_gpu
 
 _lock = threading.Lock()
 GEN = None
+DEC = None
 META = {"file": CKPT_FILE, "ids": None, "ready": False, "error": "", "load_s": None}
 
 
 def preload():
-    global GEN
+    global GEN, DEC
     from huggingface_hub import hf_hub_download
     t = time.time()
     print("[Fractus Atom] downloading", CKPT_REPO, CKPT_FILE, flush=True)
     path = hf_hub_download(CKPT_REPO, CKPT_FILE, repo_type="model")
     eng, cfg = load_checkpoint(path, dtype=torch.float32)   # strict=True inside; raises on any missing/unexpected key
     GEN = FixedGenerator(eng, final_norm=None, warm=127)
+    DEC = Decoder(GEN)
     META.update(ids=cfg.get("ids_processed"), ready=True, load_s=round(time.time() - t, 1))
     print("[Fractus Atom] READY (strict load) ids_processed=%s in %ss" % (META["ids"], META["load_s"]), flush=True)
 
 
-def infer(prompt, max_new, warm, temperature, top_k, final_norm):
+def infer(prompt, max_new, warm, temperature, top_k, final_norm, decoder="greedy / top-k", template=False):
     prompt = (prompt or "").strip()
     if not prompt:
         return "(empty prompt)"
@@ -55,12 +59,18 @@ def infer(prompt, max_new, warm, temperature, top_k, final_norm):
             t = time.time()
             GEN.final_norm = None if final_norm == "off" else final_norm
             w = int(warm)
-            ctx = GEN.context(GEN.encode_prompt(prompt[:400]), warm=w)
-            out = GEN.generate(ctx, max_new=int(max_new), temperature=float(temperature), top_k=int(top_k))
+            text = template_prompt(prompt[:80]) if template else prompt[:400]
+            ctx = GEN.context(GEN.encode_prompt(text), warm=w)
+            if decoder == "beam 4":
+                out = DEC.beam(ctx, n=int(max_new), W=4)
+            elif decoder == "min-p (T 0.7, p 0.1, no-repeat 4)":
+                out = DEC.sample(ctx, n=int(max_new), T=0.7, min_p=0.1, ngram=4)
+            else:
+                out = GEN.generate(ctx, max_new=int(max_new), temperature=float(temperature), top_k=int(top_k))
             txt = GEN.tok.decode(out)
             return "%s\n\n---\nwith markers: %s\nunique ids=%d/%d | warm=%d | T=%.2f top_k=%d | final_norm=%s | %.1fs" % (
                 txt if txt.strip() else "(only markers/whitespace)", show(out), len(set(out)), len(out), w,
-                float(temperature), int(top_k), final_norm, time.time() - t)
+                float(temperature), int(top_k), final_norm, decoder, bool(template), time.time() - t)
         except Exception as e:  # noqa: BLE001
             META["error"] = "%s: %s" % (type(e).__name__, e)
             return "error: %s" % META["error"]
@@ -85,15 +95,19 @@ demo = gr.Interface(
         gr.Slider(0.0, 1.5, value=0.0, step=0.05, label="temperature (0 = greedy)"),
         gr.Slider(1, 50, value=20, step=1, label="top-k (used when temperature > 0)"),
         gr.Radio(["off", "rms", "ln"], value="off", label="final norm before the tied head (trained without: off)"),
+        gr.Radio(["greedy / top-k", "beam 4", "min-p (T 0.7, p 0.1, no-repeat 4)"], value="greedy / top-k",
+                 label="decoder (beam 4 is ~4x slower on CPU; see docs/DEEP_DIVE_GENERATION.md section 9)"),
+        gr.Checkbox(value=False, label="format prompt as a corpus template (prompt = topic, e.g. 'photosynthesis')"),
     ],
     outputs=gr.Textbox(lines=12, label="output"),
     title="Fractus CTE-Atom: fixed generation path",
     description=STATUS + " | fixed 128-id grid, committed carry, open chunk re-forwarded, warm start. "
                 "Raw byte-level output of an ACI field model; CPU, ~2-5 s per id.",
     examples=[
-        ["The capital of France is", 24, 127, 0.0, 20, "off"],
-        ["Once upon a time", 24, 127, 0.0, 20, "off"],
-        ["Hello", 24, 127, 0.0, 20, "off"],
+        ["The capital of France is", 24, 127, 0.0, 20, "off", "greedy / top-k", False],
+        ["Once upon a time", 24, 127, 0.0, 20, "off", "greedy / top-k", False],
+        ["Hello", 24, 127, 0.0, 20, "off", "greedy / top-k", False],
+        ["photosynthesis", 24, 127, 0.0, 20, "off", "beam 4", True],
     ],
     cache_examples=False,
     allow_flagging="never",
