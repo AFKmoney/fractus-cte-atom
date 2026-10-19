@@ -51,7 +51,16 @@ def build_from_state(sd: dict, cfg: dict, dtype=torch.float32) -> ContinuousThou
             # siren_* are the unused grow copies (not on the forward path): keep them as stored
             v = v if '.siren_' in k else v.to(dtype)
         out[k] = v
+    ch = {k[len('copy_head.'):]: v for k, v in out.items() if k.startswith('copy_head.')}
+    out = {k: v for k, v in out.items() if not k.startswith('copy_head.')}
     missing, unexpected = eng.load_state_dict(out, strict=True, assign=True)
+    if ch:   # v5 copy-head checkpoint (docs/COPY_HEAD.md): readout head, strict on its own keys
+        from .nn.copy_head import attach_copy_head
+        c = cfg.get('copy_head', {})
+        attach_copy_head(eng, n_heads=int(c.get('n_heads', 8)), d_head=int(c.get('d_head', 64)),
+                         mem=int(c.get('mem', 128)), shift_keys=bool(c.get('shift_keys', True)),
+                         ngram=int(c.get('ngram', 1)))
+        eng.copy_head.load_state_dict({k: v.to(dtype) for k, v in ch.items()}, strict=True)
     for blk in eng.blocks:
         blk.moe.temperature = float(cfg.get('gate_temp', 2.5))
     eng.eval()
@@ -86,6 +95,8 @@ class FixedGenerator:
         self.h_ref = None   # reference norm for 'rms' (set by calibrate or first call)
 
     # ---- carry
+    # Engines with a copy head (fractus/nn/copy_head.py) carry one more piece of state: the K/V window.
+    # The snapshot is then (thought_state, blocks, copy_head_state); without a head it is unchanged.
     def cold(self):
         e = self.eng
         e.reset_thought(1)
@@ -93,16 +104,28 @@ class FixedGenerator:
         for b in e.blocks:
             b.attn_S, b.attn_z, b.kuramoto_phases = (b.attn_S.to(self.dtype), b.attn_z.to(self.dtype),
                                                      b.kuramoto_phases.to(self.dtype))
+        if getattr(e, 'copy_head', None) is not None:
+            e.copy_head.reset_state(1, dtype=self.dtype)
 
     def get(self):
         e = self.eng
-        return (e.thought_state.clone(), [(b.attn_S.clone(), b.attn_z.clone(), b.kuramoto_phases.clone()) for b in e.blocks])
+        s = (e.thought_state.clone(), [(b.attn_S.clone(), b.attn_z.clone(), b.kuramoto_phases.clone()) for b in e.blocks])
+        if getattr(e, 'copy_head', None) is not None:
+            s = s + (e.copy_head.get_state(),)
+        return s
 
     def put(self, s):
         e = self.eng
         e.thought_state = s[0].clone()
         for b, (x, z, k) in zip(e.blocks, s[1]):
             b.attn_S, b.attn_z, b.kuramoto_phases = x.clone(), z.clone(), k.clone()
+        if len(s) > 2:
+            e.copy_head.put_state(s[2])
+
+    def readout(self, h):
+        """Body hidden (B, L, D) -> what the tied head reads (copy head applied, window updated)."""
+        ch = getattr(self.eng, 'copy_head', None)
+        return h if ch is None else ch.attend(h)
 
     # ---- one chunk = tick_chunk_train math (no counters), with the optional final norm
     @torch.inference_mode()
@@ -114,7 +137,7 @@ class FixedGenerator:
         for blk in e.blocks:
             h, _ = blk.tick_chunk_core(h)
         e.thought_state = h[:, -1:, :].detach()
-        return self.head(h[0])
+        return self.head(self.readout(h)[0])
 
     def head(self, h: torch.Tensor) -> torch.Tensor:
         h = h.float()

@@ -32,12 +32,19 @@ class Decoder:
     # ---- batched state helpers
     @staticmethod
     def stack(snaps):
-        return (torch.cat([s[0] for s in snaps]),
-                [tuple(torch.cat([s[1][j][k] for s in snaps]) for k in range(3)) for j in range(len(snaps[0][1]))])
+        st = (torch.cat([s[0] for s in snaps]),
+              [tuple(torch.cat([s[1][j][k] for s in snaps]) for k in range(len(snaps[0][1][j])))
+               for j in range(len(snaps[0][1]))])
+        if len(snaps[0]) > 2:   # copy-head window (fractus/nn/copy_head.py)
+            st = st + (tuple(torch.cat([s[2][k] for s in snaps]) for k in range(len(snaps[0][2]))),)
+        return st
 
     @staticmethod
     def row(state, i):
-        return (state[0][i:i + 1].clone(), [tuple(t[i:i + 1].clone() for t in b) for b in state[1]])
+        r = (state[0][i:i + 1].clone(), [tuple(t[i:i + 1].clone() for t in b) for b in state[1]])
+        if len(state) > 2:
+            r = r + (tuple(t[i:i + 1].clone() for t in state[2]),)
+        return r
 
     @torch.inference_mode()
     def _forward(self, rows, snaps):
@@ -50,6 +57,7 @@ class Decoder:
         for blk in e.blocks:
             h, _ = blk.tick_chunk_core(h)
         e.thought_state = h[:, -1:, :].detach()
+        h = G.readout(h)
         return G.head(h.reshape(-1, h.shape[-1])).reshape(h.shape[0], h.shape[1], -1), h, G.get()
 
     def start(self, ctx):
