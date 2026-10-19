@@ -181,3 +181,9 @@ Each rung changes only `SS_RATE` in `run_v2.py` (backups `run_v2.py.bak_ss035_20
   - Processes: `run_v4.py` (`/workspace/run_v4.pid`), `fast4gpu_atom_v4.py` (`/workspace/trainer_v4.pid`), `push_good_atom_v4.py` (`/workspace/push_v4.pid`).
   - Logs: `/workspace/train_v4.log`, `/workspace/runner_v4.log`, `/workspace/push_v4.log`, `/workspace/ckpt_v4/val_log.jsonl`.
   - Checkpoints in `/workspace/ckpt_v4/`. State in `/workspace/run_v4_state.json`.
+
+### v4 note 00:50 ET Oct 19
+- Rollback #1 at 23:46 ET (03:46:51Z): 51 consecutive skipped steps. The runner restarted from `ckpt_v4/good` (20.48M v4 ids) with LR 1.175e-5. The data position kept moving forward (start_token 1,627,904). The runner launched with `opt_in: null`, i.e. without optimizer state.
+- Around 00:40 ET the skip count jumped from 26 to 163, with up to 21+ consecutive skips. It subsided before reaching the rollback threshold.
+- At 56.4M v4 ids: tf ~2.6-2.7, VAL 2.77 (at 51.6M), 10.57k ids/s.
+- Pod disk cleanup: 60 GB free (see WORK_LOG).
