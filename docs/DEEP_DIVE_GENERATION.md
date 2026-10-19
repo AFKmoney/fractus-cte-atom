@@ -332,3 +332,148 @@ Suggested next measurements (inference only):
 - whether copying works within the open 128-id chunk but fails across the chunk boundary, i.e. through the carry.
 
 **Does it speak?** No. With every decoder, the best output is template scaffolding with misspelled slot words. Beam and min-p change a few bytes, not the outcome.
+
+## 10. v4 (real-text corpus) vs v3: generation, copy probe, val NLL (2026-10-19, ~01:15-02:35 ET)
+
+Checkpoints (box copies, read-only):
+- **v4 good**: pod `ckpt_v4/good`, step_00025000, 77,246,464 v4 ids (5,389,307,904 ids total, resumed from v3 step_330000), ema_tf 2.65. Copied from the pod with `nice`/`ionice cat`; md5 9235ea05... on box and pod. HF `checkpoints/atom_v4` still held the 20,480,000-id good checkpoint at the time.
+- **v3 step_00330000** (5,312,061,440 ids, the v4 resume point): HF `checkpoints/atom_v3/step_00330000`, sha256 aada3965... verified.
+
+Setup:
+- fp32, fixed generation path (`fractus/fixed_generation.py`), decoders from `scripts/gen_best.py`.
+- Warm start: the real 127-id tail of a v4 val doc.
+- Val data: the per-source v4 val files (`fineweb_val.i16`, `wiki_val.i16`, `tinystories_val.i16`, `pg19_val.i16`; held out from training).
+- Script: `scripts/v4_eval.py` (resumable). Summary: `scripts/v4_eval_summary.py`. Raw data: `docs/deep_dive_data/v4_eval_77M_vs_v3_330000.jsonl`.
+
+PG-19 mean NLL is dominated by 2 of 8 windows taken from a book index (runs of spaces and page numbers). There v4 scores 13.6-14.6 nats/id: it is confidently wrong on whitespace runs. The median window (2.70) is in line with the other sources.
+
+### Val NLL per source (8 windows x 1024 scored ids each, 127-id context)
+
+| model | source | NLL nats/id (mean of windows) | median window NLL | top-1 | bits/byte |
+|---|---|---|---|---|---|
+| v3_330000 | fineweb | 14.101 | 12.471 | 0.125 | 21.146 |
+| v3_330000 | wiki | 46.647 | 19.752 | 0.107 | 70.480 |
+| v3_330000 | tinystories | 15.937 | 14.396 | 0.128 | 23.981 |
+| v3_330000 | pg19 | 113.505 | 12.808 | 0.089 | 171.499 |
+| v4_77M | fineweb | 2.741 | 2.694 | 0.253 | 4.111 |
+| v4_77M | wiki | 2.831 | 2.670 | 0.246 | 4.278 |
+| v4_77M | tinystories | 2.508 | 2.443 | 0.289 | 3.773 |
+| v4_77M | pg19 | 5.502 | 2.695 | 0.207 | 8.313 |
+
+### Copy probe on real text (words of >=5 letters in the scored region; previous occurrence in the same 128-id grid chunk vs only in an earlier chunk)
+
+| model | class | words | NLL/id all bytes | top-1 all | NLL first byte | top-1 first byte | NLL bytes 2..n | top-1 bytes 2..n | median distance (ids) |
+|---|---|---|---|---|---|---|---|---|---|
+| v3_330000 | first | 1631 | 24.546 | 0.099 | 45.133 | 0.042 | 21.116 | 0.108 | - |
+| v3_330000 | repeat_same_chunk | 80 | 26.789 | 0.094 | 43.475 | 0.025 | 23.755 | 0.107 | 37 |
+| v3_330000 | repeat_earlier_chunk | 334 | 18.303 | 0.101 | 35.234 | 0.048 | 15.399 | 0.110 | 205 |
+| v4_77M | first | 1631 | 3.131 | 0.116 | 4.180 | 0.044 | 2.956 | 0.128 | - |
+| v4_77M | repeat_same_chunk | 80 | 3.014 | 0.123 | 3.884 | 0.025 | 2.856 | 0.141 | 37 |
+| v4_77M | repeat_earlier_chunk | 334 | 3.048 | 0.103 | 3.757 | 0.036 | 2.926 | 0.114 | 205 |
+
+### Generation (fp32 fixed path, warm = real 127-id val tail; CONT = 256-id val prefix, 40 ids)
+
+| model | decoder | CONT unique@40 | CONT exact /40 | CONT seqmatch | CONT real-word | prompt unique@40 | prompt real-word |
+|---|---|---|---|---|---|---|---|
+| v3_330000 | greedy | 14.0 | 1.67 | 0.292 | 0.38 | 14.0 | 0.18 |
+| v3_330000 | beam8 | 14.3 | 3.33 | 0.258 | 0.28 | 13.3 | 0.08 |
+| v3_330000 | minp_T0.7_p0.1_ng4 | 13.7 | 3.00 | 0.275 | 0.39 | 15.0 | 0.13 |
+| v4_77M | greedy | 8.0 | 5.33 | 0.275 | 0.96 | 9.3 | 0.90 |
+| v4_77M | beam8 | 10.7 | 4.67 | 0.183 | 0.63 | 11.3 | 0.87 |
+| v4_77M | minp_T0.7_p0.1_ng4 | 14.0 | 4.33 | 0.225 | 0.40 | 13.0 | 0.64 |
+
+### Raw outputs (unedited, markers shown)
+
+**v3_330000 / greedy**
+
+| case | generated | true |
+|---|---|---|
+| fineweb_doc3 | `t 'r sofont <B1>br aleator lioaleatior <B1>gae` | `Who Won!⏎<B3>is for all students. All <B1>stud` |
+| wiki_doc3 | ` tom t t tha oo acof chatheathe <B1>bytheab` | `s are forest <B1>and shrubland, but it has ` |
+| tinystories_doc3 | `oetoebas?<B2><B2>2? event? wove ero?? bebebefr` | `g, green thumb! <B1>It was so big, Bob had ` |
+| The capital of France is | `alotl<B1>troky attion<B1>anglngl. ong. <B1>oook a` |  |
+| Once upon a time | `ttilltilet <B1>t..onon <B1>oon pk pt asaran <B1>p` |  |
+| Hello | `g tttebenabten<B1>yl.oon as <B1>g'ablool aiale` |  |
+
+**v3_330000 / beam8**
+
+| case | generated | true |
+|---|---|---|
+| fineweb_doc3 | `t 's bthapoonc 'amol al <B1>ofofofir aleg a` | `Who Won!⏎<B3>is for all students. All <B1>stud` |
+| wiki_doc3 | ` tom t oom t a a cofrof thacheachathethe` | `s are forest <B1>and shrubland, but it has ` |
+| tinystories_doc3 | `oetoebas?<B2><B2>2? event? wove ero?? bebebro?` | `g, green thumb! <B1>It was so big, Bob had ` |
+| The capital of France is | `atlrt<B1>tonackting <B1>uglol. g.ooook <B1>a angl` |  |
+| Once upon a time | `ttilltilet <B1>tionsonan <B1>oook k <B1>n tobllea` |  |
+| Hello | `g tttebebenabe<B1>agyt. <B1>trooon all aslelg ` |  |
+
+**v3_330000 / minp_T0.7_p0.1_ng4**
+
+| case | generated | true |
+|---|---|---|
+| fineweb_doc3 | `so'r wou t fr thamor <B1>troront aexcent fo` | `Who Won!⏎<B3>is for all students. All <B1>stud` |
+| wiki_doc3 | ` gom t t acom of o ha thachacon <B1>theor t` | `s are forest <B1>and shrubland, but it has ` |
+| tinystories_doc3 | `ontoekenenesonegisoone <B1>e <B1>aent asas as ` | `g, green thumb! <B1>It was so big, Bob had ` |
+| The capital of France is | `alotl<B1>troky atingg.<B2>fong. <B1>fofooa apugle` |  |
+| Once upon a time | `ttilltilet <B1>t..onons <B1>aooon a abllegleag` |  |
+| Hello | `g tttebenabten<B1>ytooo <B1>al al tlexag.oor a` |  |
+
+**v4_77M / greedy**
+
+| case | generated | true |
+|---|---|---|
+| fineweb_doc3 | `th Seres teres the \| \| \|\|\|\|\|\|\|\|\|\|\|\|\|\|\|\|⏎` | `Who Won!⏎<B3>is for all students. All <B1>stud` |
+| wiki_doc3 | `s  an an an ale alin <B1>aliand an ale ale ` | `s are forest <B1>and shrubland, but it has ` |
+| tinystories_doc3 | `n  a and a a and and <B1>ande ande and and ` | `g, green thumb! <B1>It was so big, Bob had ` |
+| The capital of France is | ` <B1>ande and Mind are and and <B1>are ande an` |  |
+| Once upon a time | ` <B1>and and and bere and are <B1>ande and and` |  |
+| Hello | `ur the <B1>whe whe whe are are and <B1>and and` |  |
+
+**v4_77M / beam8**
+
+| case | generated | true |
+|---|---|---|
+| fineweb_doc3 | `thhed \| \|\|\|\|\|\|\|\|\|\|\|\|\|\|\|\|\|\|⏎<B3>\|⏎<B3>\|\|⏎<B3>\|\|\|\|⏎` | `Who Won!⏎<B3>is for all students. All <B1>stud` |
+| wiki_doc3 | `s  He He ale ale ale ande ande <B1>the are ` | `s are forest <B1>and shrubland, but it has ` |
+| tinystories_doc3 | `s  the the the <B1>Minde he he are are and ` | `g, green thumb! <B1>It was so big, Bob had ` |
+| The capital of France is | ` and <B1>the thererere there <B1>where and are` |  |
+| Once upon a time | ` the <B1>the where whe ware <B1>there and the ` |  |
+| Hello | `und th!<B2>⏎<B3>Mind Mind and Mine Min Mind Mi` |  |
+
+**v4_77M / minp_T0.7_p0.1_ng4**
+
+| case | generated | true |
+|---|---|---|
+| fineweb_doc3 | `Jeere Suntof Seteane Stato <B1>Sche tandest` | `Who Won!⏎<B3>is for all students. All <B1>stud` |
+| wiki_doc3 | `s e t al <B1>ofhe he ar atato arero hand it` | `s are forest <B1>and shrubland, but it has ` |
+| tinystories_doc3 | `s  le al ale berea s athe <B1>arere tande t` | `g, green thumb! <B1>It was so big, Bob had ` |
+| The capital of France is | ` <B1>whe wheromer be <B1>and ande bero tend s ` |  |
+| Once upon a time | ` <B1>whe wherome bre ar and be <B1>the thanes ` |  |
+| Hello | ` nd ther <B1>omerere an ande d hero than <B1>t` |  |
+
+
+### Reading
+
+- **Real text helps a lot, but it is very early.** v3 on real val text scores 12-20 nats/id (median window), worse than uniform (5.58). After 77M ids of real text, v4 is at 2.4-2.7 nats/id, about 3.8-4.3 bits/byte. That is still far from a usable byte-level model (~1-1.5 bits/byte), and top-1 is only 0.25.
+- **Generation.**
+  - v4 greedy collapses into high-frequency fragments ("and and", "the the", `||||`).
+  - v4 min-p is more varied but stays non-words around real short words ("the", "and", "are", "he", "of").
+  - v3 is letter soup on real-text prompts.
+  - The high v4 greedy real-word rate (0.90-0.96) is an artifact of repeating "and"/"the".
+- **Copy probe.** For words of 5 or more letters, a second mention is predicted no better than a first mention in v4:
+
+  | v4 | bytes 2..n NLL | first byte NLL |
+  |---|---|---|
+  | first mention | 2.96 | 4.18 |
+  | repeat, same chunk | 2.86 | 3.88 |
+  | repeat, earlier chunk | 2.93 | 3.76 |
+
+  A model that copies would bring the rest-of-word NLL of repeats close to 0. There is no gain even when the earlier occurrence is in the same 128-id chunk (median 37 ids back), where the linear attention sees it directly. So the absence of copying is not only a carry problem.
+  - v3 shows the same lack of copy behavior at a much worse level. Its earlier-chunk repeats look "better" (18 vs 25 nats) only because it is wildly miscalibrated.
+
+**Does it speak?** No. v4 at 77M real-text ids produces short real function words in broken sequences, with no topical continuation and no prompt following.
+
+**Bottleneck now.**
+1. **Data volume and optimization.** The model has seen only ~5% of the 1.4B-id v4 budget, and the pod log shows lr ≈ 1.16e-5. Val NLL is still in the regime where any byte model mostly learns unigram/bigram statistics.
+2. **Copying.** There is no in-context copying yet, not even within a chunk. Small attention models usually pick up copy behavior within a few hundred million tokens, so this alone does not prove a mechanism failure at 77M ids.
+
+What would separate the two: rerun `scripts/v4_eval.py` on later v4 good checkpoints (for example every ~200M ids) and watch the gap between repeat and first-mention NLL. If val NLL keeps falling while the repeat gap stays near zero, the field/carry mechanism (elu+1 linear attention with level-mean carry) is the bottleneck rather than data.
