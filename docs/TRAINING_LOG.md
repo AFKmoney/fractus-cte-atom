@@ -160,3 +160,24 @@ Each rung changes only `SS_RATE` in `run_v2.py` (backups `run_v2.py.bak_ss035_20
   - The guards are relaxed for the switch, because v3 scores 19.8-24.7 nats/id on real text (CPU check).
   - Installed on the pod, not launched. v3 keeps running.
 - **Budget.** A full pass takes 36.7 h / $19.27 at 10.6k ids/s and $0.525/h. Credit was $18.08 at 19:34 ET, so the run should be launched with `PLAN_IDS` ~1.1B (28.8 h, $15.13).
+
+## 2026-10-18 23:05 ET: switch to v4 (real-language corpus)
+- **Stop v3.** Runner, pusher and trainer were stopped at 03:05:14Z (23:05 ET). The last v3 log line was at 5,318,205,440 ids.
+  - Resume point: v3 good/ = v3-segment step_00330000, 5,312,061,440 ids, ema_tf 0.526, saved 02:55Z.
+  - That checkpoint is not on HF (the last HF v3 push is 5,025,341,440 ids). It is kept on the pod in `ckpt_v3/good/` and hard-linked as `/workspace/ckpt_v4_from_v3/`.
+- **Launch v4.** 03:05:23Z (23:05 ET) with `PLAN_IDS=1100000000 bash /workspace/launch_v4.sh`.
+  - `run_v4.py` -> `scripts/fast4gpu_atom_v4.py`, `CORPUS=/workspace/atom_corpus_v4` (16 lanes of 87,518,466 ids), `CORPUS_SWITCH=1`, `START_TOKEN=0`, `IDS_BASE=5312061440`.
+  - Weights and AdamW state come from the checkpoint above.
+  - LR 2.35e-5 cosine to 2.5e-6 over 537,109 steps, warmup 500.
+  - SS_RATE 0.35, SS_TAIL_IDS 8, ss_p 0.85. B=16, SEQ=128.
+  - VAL every 2,500 steps on 262,144 held-out ids.
+- **First 15 min.**
+  - VAL before step 1: 16.98 nats/id (v3 on real text).
+  - ema_tf 12.35 (0.4M ids) -> 5.17 (1.6M) -> 3.79 (6.1M) -> 3.63 (9.4M). tf 2.9-4.6.
+  - 10,400-10,560 ids/s wall, SS 23-24% of wall time, mem_peak 29.2 GB.
+  - 0 non-finite, 0 rollbacks.
+  - 35 isolated GN skips by step ~4,600. Step 0 had gn 1.88M, and there were two more >1M spikes in the 2,000-step grace. After the grace, the threshold is 10x gn_ema (~1,000-1,200). At most 1 consecutive skip.
+- **Processes / logs.**
+  - Processes: `run_v4.py` (`/workspace/run_v4.pid`), `fast4gpu_atom_v4.py` (`/workspace/trainer_v4.pid`), `push_good_atom_v4.py` (`/workspace/push_v4.pid`).
+  - Logs: `/workspace/train_v4.log`, `/workspace/runner_v4.log`, `/workspace/push_v4.log`, `/workspace/ckpt_v4/val_log.jsonl`.
+  - Checkpoints in `/workspace/ckpt_v4/`. State in `/workspace/run_v4_state.json`.
