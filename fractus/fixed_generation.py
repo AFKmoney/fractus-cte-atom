@@ -86,13 +86,21 @@ def load_checkpoint(path: str, dtype=torch.float32) -> tuple:
 
 
 class FixedGenerator:
-    def __init__(self, eng: ContinuousThoughtEngine, final_norm: str | None = None, warm: int = 64):
+    def __init__(self, eng: ContinuousThoughtEngine, final_norm: str | None = None, warm: int = 64,
+                 carry_decay: float = 1.0):
         self.eng = eng
+        self.set_carry_decay(carry_decay)
         self.tok = AtomFractusTokenizer()
         self.final_norm = final_norm
         self.warm = warm
         self.dtype = next(p for n, p in eng.named_parameters() if 'observe' in n).dtype
         self.h_ref = None   # reference norm for 'rms' (set by calibrate or first call)
+
+    def set_carry_decay(self, gamma: float = 1.0):
+        """Inference-only: each chunk reads gamma * (attn_S, attn_z) (fractus/carry_policy.py, docs/LONG_CARRY.md).
+        1.0 (default) = the trained function."""
+        from .carry_policy import set_carry_decay
+        set_carry_decay(self.eng, gamma)
 
     # ---- carry
     # Engines with a copy head (fractus/nn/copy_head.py) carry one more piece of state: the K/V window.
@@ -162,14 +170,25 @@ class FixedGenerator:
         ids, _ = self.tok.encode_open(text)    # BOS + bytes (+ markers), no closing <B6><EOS>
         return list(ids)
 
-    def generate(self, ctx, max_new=40, temperature=0.0, top_k=1, seed=0, stop_at_eos=True):
+    def _commit(self, seq, com, carry_window):
+        """commit seq[com:com+SEQ]. carry_window K>0: the committed state is a cold replay of only the last K
+        committed chunks (sliding window, docs/LONG_CARRY.md); 0 = full carry (trained function)."""
+        if carry_window and carry_window > 0:
+            self.cold()
+            for j in range(max(0, com + SEQ - carry_window * SEQ), com + SEQ, SEQ):
+                self.chunk(seq[j:j + SEQ])
+        else:
+            self.chunk(seq[com:com + SEQ])
+        return com + SEQ
+
+    def generate(self, ctx, max_new=40, temperature=0.0, top_k=1, seed=0, stop_at_eos=True, carry_window=0):
         """ctx: full id context (warm tail + BOS + prompt). Grid starts at ctx[0], zero carry."""
         g = torch.Generator().manual_seed(seed)
         seq = list(ctx)
         self.cold()
         com = 0
         while len(seq) - com > SEQ:
-            self.chunk(seq[com:com + SEQ]); com += SEQ
+            com = self._commit(seq, com, carry_window)
         out = []
         for _ in range(max_new):
             s = self.get(); lg = self.chunk(seq[com:])[-1].clone(); self.put(s)
@@ -183,7 +202,7 @@ class FixedGenerator:
             if stop_at_eos and nid == EOS:
                 break
             if len(seq) - com > SEQ:
-                self.chunk(seq[com:com + SEQ]); com += SEQ
+                com = self._commit(seq, com, carry_window)
         return out
 
 
