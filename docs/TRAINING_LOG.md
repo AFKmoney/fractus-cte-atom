@@ -187,3 +187,11 @@ Each rung changes only `SS_RATE` in `run_v2.py` (backups `run_v2.py.bak_ss035_20
 - Around 00:40 ET the skip count jumped from 26 to 163, with up to 21+ consecutive skips. It subsided before reaching the rollback threshold.
 - At 56.4M v4 ids: tf ~2.6-2.7, VAL 2.77 (at 51.6M), 10.57k ids/s.
 - Pod disk cleanup: 60 GB free (see WORK_LOG).
+
+## 2026-10-20 04:01 ET: v4 pass finished, pod stopped
+- Trainer `fast4gpu_atom_v4.py` exited with code 0 at 08:01:33Z after reaching `PLAN_IDS=1100000000`.
+- Final step 524,391: 1,099,999,232 v4 ids, so 6,412,060,672 ids in total (5,312,061,440 from v3 + v4). ema_tf 2.381, 370 skipped steps, no NaN, 1 rollback (Oct 19).
+- Validation (held-out real text, 262,144 ids): first 16.98, best 2.4436 (step 502,500), last 2.4483 nats/id (step 522,500).
+- Throughput: 10,564 ids/s wall over 101,662 s (TF 13,890 ids/s, SS 16,350 ids/s, SS on the last 8 ids at 0.35).
+- HF: final weights + optimizer in `checkpoints/atom_v4/step_final/` (`fractus_atom_1b_gpu0.bin`, `fractus_atom_1b_gpu0.opt.bin`, `RESUME_MANIFEST_atom_gpu0.json`, `GOOD.json`); logs in `logs/atom_v4/`.
+- No credit left for more training, so the Vast pod (instance 55477318) was stopped (not destroyed).
