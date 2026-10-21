@@ -205,6 +205,113 @@ class FixedGenerator:
                 com = self._commit(seq, com, carry_window)
         return out
 
+    # ---- exact incremental stepping (docs/GEN_FINAL.md)
+    # Same function as generate(): fixed 128-id grid, committed carry, thought_state added at grid position 0 only.
+    # Instead of re-forwarding the whole open chunk for every new id, the open chunk keeps its PER-LEVEL linear
+    # attention state (the kernel state before the mean over levels that _store_carry does at a chunk end), so each
+    # new id costs one 1-position forward. Every op of the block is per position (attention is causal, Kuramoto
+    # and MoE act per position), so the logits equal the re-forward ones up to float rounding.
+    @torch.inference_mode()
+    def _core(self, ids, flats, first: bool):
+        e = self.eng
+        h = e.observe(torch.tensor([list(ids)])).clone()
+        if first:
+            h[:, 0, :] = h[:, 0, :] + e.thought_state[:, 0, :]
+        new = []
+        for blk, (S, z) in zip(e.blocks, flats):
+            h, _, S2, z2, _th = blk._tick_chunk_core_pure(h, S, z)
+            new.append((S2, z2))
+        return h, new
+
+    @torch.inference_mode()
+    def _open_flats(self):
+        # _build_carry applies the optional inference carry decay once per chunk, exactly like chunk() does.
+        return [tuple(t.clone() for t in blk._build_carry(1)) for blk in self.eng.blocks]
+
+    @torch.inference_mode()
+    def stream_start(self, ctx, carry_window: int = 0) -> torch.Tensor:
+        """Commit every full chunk of ctx, forward the open part once; returns next-id logits (V,)."""
+        if getattr(self.eng, 'copy_head', None) is not None:
+            raise NotImplementedError('stream path: engines with a copy head use generate()')
+        self.cold()
+        self.seq, self.com, self.cw = list(ctx), 0, carry_window
+        while len(self.seq) - self.com > SEQ:
+            self.com = self._commit(self.seq, self.com, carry_window)
+        h, self.flats = self._core(self.seq[self.com:], self._open_flats(), True)
+        self.h_last = h[:, -1:, :]
+        return self.head(h[0, -1:])[0]
+
+    @torch.inference_mode()
+    def stream_push(self, nid: int) -> torch.Tensor:
+        """Append one id; returns next-id logits (V,)."""
+        e = self.eng
+        self.seq.append(int(nid))
+        if len(self.seq) - self.com > SEQ:          # the open chunk is full: commit it, nid opens the next one
+            if self.cw and self.cw > 0:
+                self.com = self._commit(self.seq, self.com, self.cw)
+            else:
+                for blk, (S, z) in zip(e.blocks, self.flats):
+                    blk._store_carry(1, S, z)
+                e.thought_state = self.h_last.detach()
+                self.com += SEQ
+            h, self.flats = self._core([nid], self._open_flats(), True)
+        else:
+            h, self.flats = self._core([nid], self.flats, False)
+        self.h_last = h[:, -1:, :]
+        return self.head(h[0, -1:])[0]
+
+    def generate_stream(self, ctx, max_new=40, *, temperature=0.0, top_k=0, top_p=1.0, min_p=0.0,
+                        rep_penalty=1.0, rep_window=64, no_repeat_ngram=0, min_new=0, stop_at_eos=True,
+                        carry_window=0, seed=0):
+        """Decode with the incremental path. Only PAD and BOS are masked; EOS is masked only while len(out) < min_new.
+        Boundary markers (<B1>..) are ordinary ids: nothing is forced and generation does not stop on them."""
+        g = torch.Generator().manual_seed(seed)
+        lg = self.stream_start(ctx, carry_window)
+        out = []
+        for _ in range(max_new):
+            nid = pick_next(lg, out, g, temperature=temperature, top_k=top_k, top_p=top_p, min_p=min_p,
+                            rep_penalty=rep_penalty, rep_window=rep_window, no_repeat_ngram=no_repeat_ngram,
+                            ban_eos=len(out) < min_new)
+            out.append(nid)
+            if stop_at_eos and nid == EOS:
+                break
+            lg = self.stream_push(nid)
+        return out
+
+
+def pick_next(logits, gen, g=None, *, temperature=0.0, top_k=0, top_p=1.0, min_p=0.0, rep_penalty=1.0,
+              rep_window=64, no_repeat_ngram=0, ban_eos=False) -> int:
+    """Logits processing for one id. Order: masks -> repetition penalty -> n-gram ban -> T -> top-k -> top-p -> min-p.
+    gen = ids generated so far (the prompt is not penalized). Greedy when temperature <= 0."""
+    z = logits.float().clone()
+    z[PAD] = -1e9; z[BOS] = -1e9
+    if ban_eos:
+        z[EOS] = -1e9
+    if rep_penalty != 1.0 and gen:
+        ids = torch.tensor(sorted(set(gen[-rep_window:])))
+        v = z[ids]
+        z[ids] = torch.where(v > 0, v / rep_penalty, v * rep_penalty)
+    n = int(no_repeat_ngram)
+    if n > 0 and len(gen) >= n - 1:
+        pre = tuple(gen[len(gen) - (n - 1):]) if n > 1 else ()
+        for i in range(len(gen) - n + 1):
+            if tuple(gen[i:i + n - 1]) == pre:
+                z[gen[i + n - 1]] = -1e9
+    if temperature <= 0:
+        return int(z.argmax())
+    z = z / temperature
+    if top_k and top_k > 0:
+        kth = torch.topk(z, min(int(top_k), z.numel())).values[-1]
+        z[z < kth] = -float('inf')
+    p = torch.softmax(z, -1)
+    if top_p < 1.0:
+        sp, si = p.sort(descending=True)
+        drop = (sp.cumsum(0) - sp) > top_p
+        p[si[drop]] = 0.0
+    if min_p > 0:
+        p = p * (p >= min_p * p.max())
+    return int(torch.multinomial(p / p.sum(), 1, generator=g))
+
 
 def show(ids) -> str:
     """Decode with boundary markers shown (<B1>.., <EOS>)."""

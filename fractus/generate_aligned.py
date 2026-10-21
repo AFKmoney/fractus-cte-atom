@@ -53,6 +53,18 @@ def generate_window(
     out: List[int] = []
     prev = ids[-1]
     if carry:
+        # 2026-10-21 (docs/GEN_FINAL.md): the old loop fed every new id as its own 1-id chunk, so thought_state was
+        # added at every id and the attention state was averaged over levels at every id (TF NLL 2,290-10,559 vs
+        # 1.8-2.8 on v4 final). Now the fixed 128-id grid, exact incremental path, warm start, open prompt.
+        from .fixed_generation import FixedGenerator
+        G = getattr(engine, "_fixed_gen", None)
+        if G is None:
+            G = FixedGenerator(engine, warm=64)
+            engine._fixed_gen = G
+        ctx = G.context(G.encode_prompt(prompt))
+        out = G.generate_stream(ctx, max_new=max_new, temperature=temperature, top_k=top_k)
+        return tokenizer.decode(out), out
+    if carry:
         _reset(engine)
         ctx_feat = feat.unsqueeze(0) if feat is not None else None
         logits = engine.tick_chunk(torch.tensor([ids], dtype=torch.long), feat=ctx_feat)
