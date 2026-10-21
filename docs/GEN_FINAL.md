@@ -54,15 +54,15 @@ share of generated [A-Za-z]{2,} words in words_alpha; distinct-word = distinct /
 | minp0.1_T0.7_ng4_cw2 | 24 | 15.3 | 2.79 | 0.63 | 0.55 | 0.45 | 0.99 |
 | T0.8_p0.9_rep1.15_cw2 | 24 | 38.6 | 1.17 | 0.20 | 0.21 | 0.11 | 0.99 |
 | T0.6_k20_rep1.1_ng6_cw2 | 24 | 35.9 | 1.88 | 0.39 | 0.38 | 0.27 | 0.98 |
-| T0.5_p0.8_ng8_cw2 | 21 | 14.3 | 3.24 | 0.68 | 0.69 | 0.61 | 0.81 |
+| T0.5_p0.8_ng8_cw2 | 24 | 14.2 | 3.29 | 0.70 | 0.70 | 0.62 | 0.78 |
 
 `oldspace` = the old demo path (generate_window carry=True, T0.7 top-k 40, cold).
 
 - carry_window 2 = full carry on greedy here (prefix only 320 ids); it helps beyond ~3 chunks (docs/LONG_CARRY.md).
 - Repetition penalty on bytes destroys words (real-word 0.20 at 1.15): letters must repeat. Do not use it.
 - **Default deterministic: greedy + no-repeat 4-gram + carry_window 2** (unique 12.0, real-word 0.76, distinct 0.96).
-- **Default sampling: T 0.5, top-p 0.8, no-repeat 8-gram, carry_window 2** (real-word 0.68-0.69, distinct 0.81,
-  exact 3.2/40), best real-word rate among the samplers.
+- **Default sampling: T 0.5, top-p 0.8, no-repeat 8-gram, carry_window 2** (real-word 0.70, distinct 0.78,
+  exact 3.3/40), best real-word rate among the samplers.
 
 ### Samples (unedited, seed 0)
 - greedy (before), fineweb_doc3: `then then the the <B1>and the the the pe the <B1>the pe the the the thee <B1>...`
